@@ -106,6 +106,7 @@ func (vmctx *VMContext) mustSetUpRequestContext(req coretypes.Request, requestIn
 		// on-ledger request
 		if input, ok := req.Output().(*ledgerstate.ExtendedLockedOutput); ok {
 			// it is an on-ledger request
+			vmctx.log.Infof("XXX WHAT %v %v", input.UnlockAddressNow(ts), vmctx.chainID.AsAddress())
 			if !input.UnlockAddressNow(ts).Equals(vmctx.chainID.AsAddress()) {
 				vmctx.log.Panicf("mustSetUpRequestContext.inconsistency: input cannot be unlocked at %v.\nInput: %s\n chainID: %s",
 					ts, input.String(), vmctx.chainID.String())

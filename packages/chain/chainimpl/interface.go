@@ -141,6 +141,7 @@ func (c *chainObj) ReceiveOffLedgerRequest(req *request.RequestOffLedger) {
 func (c *chainObj) ReceiveTransaction(tx *ledgerstate.Transaction) {
 	c.log.Debugf("ReceiveTransaction: %s", tx.ID().Base58())
 	reqs, err := request.RequestsOnLedgerFromTransaction(tx, c.chainID.AsAddress())
+	c.log.Infof("XXX REQUESTS %v", len(reqs))
 	if err != nil {
 		c.log.Warnf("failed to parse transaction %s: %v", tx.ID().Base58(), err)
 		return

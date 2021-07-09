@@ -149,7 +149,7 @@ func (env *MockedEnv) PostTransactionToLedger(tx *ledgerstate.Transaction) {
 }
 
 func (env *MockedEnv) PullStateFromLedger(addr *ledgerstate.AliasAddress) *chain.StateMsg {
-	env.Log.Debugf("MockedEnv.PullStateFromLedger request received for address %v", addr.Base58)
+	env.Log.Debugf("MockedEnv.PullStateFromLedger request received for address %v", addr.Base58())
 	outputs := env.Ledger.GetAddressOutputs(addr)
 	require.EqualValues(env.T, 1, len(outputs))
 	outTx, ok := env.Ledger.GetTransaction(outputs[0].ID().TransactionID())
@@ -165,7 +165,7 @@ func (env *MockedEnv) PullStateFromLedger(addr *ledgerstate.AliasAddress) *chain
 }
 
 func (env *MockedEnv) PullConfirmedOutputFromLedger(addr ledgerstate.Address, outputID ledgerstate.OutputID) ledgerstate.Output {
-	env.Log.Debugf("MockedEnv.PullConfirmedOutputFromLedger for address %v output %v", addr.Base58, coretypes.OID(outputID))
+	env.Log.Debugf("MockedEnv.PullConfirmedOutputFromLedger for address %v output %v", addr.Base58(), coretypes.OID(outputID))
 	tx, foundTx := env.Ledger.GetTransaction(outputID.TransactionID())
 	require.True(env.T, foundTx)
 	outputIndex := outputID.OutputIndex()
@@ -210,7 +210,7 @@ func (env *MockedEnv) NewMockedNode(nodeIndex int, timers StateManagerTimers) *M
 		env.PostTransactionToLedger(tx)
 	})
 	ret.NodeConn.OnPullState(func(addr *ledgerstate.AliasAddress) {
-		log.Debugf("MockedNode.OnPullState request received for address %v", addr.Base58)
+		log.Debugf("MockedNode.OnPullState request received for address %v", addr.Base58())
 		response := env.PullStateFromLedger(addr)
 		log.Debugf("MockedNode.OnPullState call EventStateMsg: chain output %s", coretypes.OID(response.ChainOutput.ID()))
 		go ret.StateManager.EventStateMsg(response)

@@ -114,7 +114,8 @@ func (c *Chains) Activate(chr *chainrecord.ChainRecord) error {
 	newChain := chainimpl.NewChain(
 		chr.ChainID,
 		c.log,
-		c.nodeConn,
+		chainimpl.GetDefaultMakeNodeConnFun(c.nodeConn),
+		chainimpl.GetDefaultMakeStateManagerFun(),
 		peerNetworkConfig,
 		chainKVStore,
 		peering.DefaultNetworkProvider(),

@@ -63,10 +63,27 @@ type committeeStruct struct {
 	cmt   chain.Committee
 }
 
+type MakeNodeConnFun func(*logger.Logger) chain.NodeConnection
+
+func GetDefaultMakeNodeConnFun(txstreamClient *txstream.Client) MakeNodeConnFun {
+	return func(log *logger.Logger) chain.NodeConnection {
+		return nodeconnimpl.New(txstreamClient, log)
+	}
+}
+
+type MakeStateManagerFun func(store kvstore.KVStore, c chain.ChainCore, peers peering.PeerDomainProvider, nodeconn chain.NodeConnection) chain.StateManager
+
+func GetDefaultMakeStateManagerFun() MakeStateManagerFun {
+	return func(db kvstore.KVStore, c chain.ChainCore, peers peering.PeerDomainProvider, nodeconn chain.NodeConnection) chain.StateManager {
+		return statemgr.New(db, c, peers, nodeconn)
+	}
+}
+
 func NewChain(
 	chainID *chainid.ChainID,
 	log *logger.Logger,
-	txstreamClient *txstream.Client,
+	makeNodeConnFun MakeNodeConnFun,
+	makeStateManagerFun MakeStateManagerFun,
 	peerNetConfig coretypes.PeerNetworkConfigProvider,
 	db kvstore.KVStore,
 	netProvider peering.NetworkProvider,
@@ -85,7 +102,7 @@ func NewChain(
 		chMsg:             make(chan interface{}, 100),
 		chainID:           *chainID,
 		log:               chainLog,
-		nodeConn:          nodeconnimpl.New(txstreamClient, chainLog),
+		nodeConn:          makeNodeConnFun(chainLog),
 		db:                db,
 		chainStateSync:    chainStateSync,
 		stateReader:       state.NewOptimisticStateReader(db, chainStateSync),
@@ -113,7 +130,7 @@ func NewChain(
 		log.Errorf("NewChain: %v", err)
 		return nil
 	}
-	ret.stateMgr = statemgr.New(db, ret, peers, ret.nodeConn)
+	ret.stateMgr = makeStateManagerFun(db, ret, peers, ret.nodeConn)
 	ret.peers = &peers
 	var peeringID peering.PeeringID = ret.chainID.Array()
 	peers.Attach(&peeringID, func(recv *peering.RecvEvent) {

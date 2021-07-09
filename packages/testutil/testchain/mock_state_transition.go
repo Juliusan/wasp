@@ -1,12 +1,15 @@
 package testchain
 
 import (
+	"fmt"
+	"github.com/iotaledger/goshimmer/packages/ledgerstate/utxodb"
 	"testing"
 	"time"
 
 	"github.com/iotaledger/wasp/packages/kv"
 
 	"github.com/iotaledger/wasp/packages/coretypes/coreutil"
+	"github.com/iotaledger/wasp/packages/coretypes/request"
 	"github.com/iotaledger/wasp/packages/vm/core/blocklog"
 
 	"github.com/iotaledger/wasp/packages/coretypes"
@@ -54,8 +57,14 @@ func (c *MockedStateTransition) NextState(vs state.VirtualState, chainOutput *le
 	counterBin = codec.EncodeUint64(counter + 1)
 	suCounter.Mutations().Set(counterKey, counterBin)
 
+	utxo := utxodb.New()
+	_, addr0 := utxo.NewKeyPairByIndex(0)
+	_, addr1 := utxo.NewKeyPairByIndex(1)
+	_, addr2 := utxo.NewKeyPairByIndex(2)
+
 	suReqs := state.NewStateUpdate()
 	for i, req := range reqs {
+		fmt.Printf("XXX doing req %v\n", i)
 		key := kv.Key(blocklog.NewRequestLookupKey(vs.BlockIndex()+1, uint16(i)).Bytes())
 		suReqs.Mutations().Set(key, req.ID().Bytes())
 	}
@@ -72,6 +81,16 @@ func (c *MockedStateTransition) NextState(vs state.VirtualState, chainOutput *le
 	if c.chainKey != nil {
 		tx, err := txBuilder.BuildWithED25519(c.chainKey)
 		require.NoError(c.t, err)
+		reqs, err := request.RequestsOnLedgerFromTransaction(tx, chainOutput.GetStateAddress())
+		fmt.Printf("XXX REQUESTs %v, err %v\n", len(reqs), err)
+		reqs, err = request.RequestsOnLedgerFromTransaction(tx, addr0)
+		fmt.Printf("XXX REQUESTs0 %v, err %v\n", len(reqs), err)
+		reqs, err = request.RequestsOnLedgerFromTransaction(tx, addr1)
+		fmt.Printf("XXX REQUESTs1 %v, err %v\n", len(reqs), err)
+		reqs, err = request.RequestsOnLedgerFromTransaction(tx, addr2)
+		fmt.Printf("XXX REQUESTs2 %v, err %v\n", len(reqs), err)
+		reqs, err = request.RequestsOnLedgerFromTransaction(tx, chainOutput.GetAliasAddress())
+		fmt.Printf("XXX REQUESTsa %v, err %v\n", len(reqs), err)
 		c.onNextState(nextvs, tx)
 	} else {
 		tx, _, err := txBuilder.BuildEssence()
