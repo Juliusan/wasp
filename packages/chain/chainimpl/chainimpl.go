@@ -35,7 +35,6 @@ import (
 	"github.com/iotaledger/wasp/packages/vm/processors"
 	"go.uber.org/atomic"
 	"golang.org/x/xerrors"
-	"gopkg.in/eapache/channels.v1"
 )
 
 var (
@@ -56,7 +55,7 @@ type chainObj struct {
 	chainStateSync                   coreutil.ChainStateSync
 	stateReader                      state.OptimisticStateReader
 	procset                          *processors.Cache
-	chMsg                            *channels.InfiniteChannel
+	chMsg                            chan interface{}
 	chMsgOverflow                    atomic.Int32 // To log a level of a channel overflow.
 	stateMgr                         chain.StateManager
 	consensus                        chain.Consensus
@@ -107,7 +106,7 @@ func NewChain(
 	ret := &chainObj{
 		mempool:           mempool.New(state.NewOptimisticStateReader(db, chainStateSync), blobProvider, chainLog, chainMetrics),
 		procset:           processors.MustNew(processorConfig),
-		chMsg:             channels.NewInfiniteChannel(),
+		chMsg:             make(chan interface{}, 100),
 		chainID:           chainID,
 		log:               chainLog,
 		nodeConn:          nodeconnimpl.New(txstreamClient, chainLog),
@@ -146,7 +145,7 @@ func NewChain(
 		ret.ReceiveMessage(recv.Msg)
 	})
 	go func() {
-		for msg := range ret.chMsg.Out() {
+		for msg := range ret.chMsg {
 			ret.dispatchMessage(msg)
 		}
 	}()
@@ -348,10 +347,10 @@ func (c *chainObj) publishNewBlockEvents(blockIndex uint32) {
 	}
 
 	go func() {
-		for _, msg := range evts {
-			c.log.Infof("publishNewBlockEvents: '%s'", msg)
-			publisher.Publish("vmmsg", c.chainID.Base58(), msg)
-		}
+	for _, msg := range evts {
+		c.log.Infof("publishNewBlockEvents: '%s'", msg)
+		publisher.Publish("vmmsg", c.chainID.Base58(), msg)
+	}
 	}()
 }
 
