@@ -21,20 +21,20 @@ const (
 )
 
 type peer struct {
-	remoteNetID    string
-	remotePubKey   *ed25519.PublicKey
-	remoteLppID    libp2ppeer.ID
-	accessLock     *sync.RWMutex
+	remoteNetID  string
+	remotePubKey *ed25519.PublicKey
+	remoteLppID  libp2ppeer.ID
+	accessLock   *sync.RWMutex
 	sendCh         chan *peering.PeerMessage
 	sendChOverflow atomic.Uint32
 	recvCh         chan *peering.RecvEvent
 	recvChOverflow atomic.Uint32
-	lastMsgSent    time.Time
-	lastMsgRecv    time.Time
-	numUsers       int
-	trusted        bool
-	net            *netImpl
-	log            *logger.Logger
+	lastMsgSent  time.Time
+	lastMsgRecv  time.Time
+	numUsers     int
+	trusted      bool
+	net          *netImpl
+	log          *logger.Logger
 }
 
 func newPeer(remoteNetID string, remotePubKey *ed25519.PublicKey, remoteLppID libp2ppeer.ID, n *netImpl) *peer {
@@ -45,7 +45,7 @@ func newPeer(remoteNetID string, remotePubKey *ed25519.PublicKey, remoteLppID li
 		remoteLppID:  remoteLppID,
 		accessLock:   &sync.RWMutex{},
 		sendCh:       make(chan *peering.PeerMessage, 100),
-		recvCh:       make(chan *peering.RecvEvent, 100),
+		recvCh:       make(chan *peering.PeerMessage, 100),
 		lastMsgSent:  time.Time{},
 		lastMsgRecv:  time.Time{},
 		numUsers:     0,
@@ -147,7 +147,9 @@ func (p *peer) SendMsg(msg *peering.PeerMessage) {
 	}
 }
 
-func (p *peer) RecvMsg(msg *peering.RecvEvent) {
+func (p *peer) RecvMsg(msg *peering.PeerMessage) {
+	p.noteReceived()
+	msg.SenderNetID = p.NetID()
 	catch := func() {
 		r := recover()
 		if err, ok := r.(error); ok && err.Error() == "send on closed channel" {
@@ -185,7 +187,10 @@ func (p *peer) sendLoop() {
 
 func (p *peer) recvLoop() {
 	for msg := range p.recvCh {
-		p.net.triggerRecvEvents(msg)
+		p.net.triggerRecvEvents(&peering.RecvEvent{
+			From: p,
+			Msg:  peerMsg,
+		})
 	}
 }
 
