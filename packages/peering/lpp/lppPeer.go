@@ -21,20 +21,20 @@ const (
 )
 
 type peer struct {
-	remoteNetID  string
-	remotePubKey *ed25519.PublicKey
-	remoteLppID  libp2ppeer.ID
-	accessLock   *sync.RWMutex
+	remoteNetID    string
+	remotePubKey   *ed25519.PublicKey
+	remoteLppID    libp2ppeer.ID
+	accessLock     *sync.RWMutex
 	sendCh         chan *peering.PeerMessage
 	sendChOverflow atomic.Uint32
-	recvCh         chan *peering.PeerMessage
+	recvCh         chan *peering.RecvEvent
 	recvChOverflow atomic.Uint32
-	lastMsgSent  time.Time
-	lastMsgRecv  time.Time
-	numUsers     int
-	trusted      bool
-	net          *netImpl
-	log          *logger.Logger
+	lastMsgSent    time.Time
+	lastMsgRecv    time.Time
+	numUsers       int
+	trusted        bool
+	net            *netImpl
+	log            *logger.Logger
 }
 
 func newPeer(remoteNetID string, remotePubKey *ed25519.PublicKey, remoteLppID libp2ppeer.ID, n *netImpl) *peer {
@@ -45,7 +45,7 @@ func newPeer(remoteNetID string, remotePubKey *ed25519.PublicKey, remoteLppID li
 		remoteLppID:  remoteLppID,
 		accessLock:   &sync.RWMutex{},
 		sendCh:       make(chan *peering.PeerMessage, 100),
-		recvCh:       make(chan *peering.PeerMessage, 100),
+		recvCh:       make(chan *peering.RecvEvent, 100),
 		lastMsgSent:  time.Time{},
 		lastMsgRecv:  time.Time{},
 		numUsers:     0,
