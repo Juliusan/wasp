@@ -21,18 +21,20 @@ const (
 )
 
 type peer struct {
-	remoteNetID    string
-	remotePubKey   *ed25519.PublicKey
-	remoteLppID    libp2ppeer.ID
-	accessLock     *sync.RWMutex
+	remoteNetID  string
+	remotePubKey *ed25519.PublicKey
+	remoteLppID  libp2ppeer.ID
+	accessLock   *sync.RWMutex
 	sendCh         chan *peering.PeerMessage
 	sendChOverflow atomic.Uint32
-	lastMsgSent    time.Time
-	lastMsgRecv    time.Time
-	numUsers       int
-	trusted        bool
-	net            *netImpl
-	log            *logger.Logger
+	recvCh         chan *peering.PeerMessage
+	recvChOverflow atomic.Uint32
+	lastMsgSent  time.Time
+	lastMsgRecv  time.Time
+	numUsers     int
+	trusted      bool
+	net          *netImpl
+	log          *logger.Logger
 }
 
 func newPeer(remoteNetID string, remotePubKey *ed25519.PublicKey, remoteLppID libp2ppeer.ID, n *netImpl) *peer {
@@ -43,6 +45,7 @@ func newPeer(remoteNetID string, remotePubKey *ed25519.PublicKey, remoteLppID li
 		remoteLppID:  remoteLppID,
 		accessLock:   &sync.RWMutex{},
 		sendCh:       make(chan *peering.PeerMessage, 100),
+		recvCh:       make(chan *peering.PeerMessage, 100),
 		lastMsgSent:  time.Time{},
 		lastMsgRecv:  time.Time{},
 		numUsers:     0,
@@ -51,6 +54,7 @@ func newPeer(remoteNetID string, remotePubKey *ed25519.PublicKey, remoteLppID li
 		log:          log,
 	}
 	go p.sendLoop()
+	go p.recvLoop()
 	return p
 }
 
@@ -83,6 +87,7 @@ func (p *peer) maintenanceCheck() {
 	if numUsers == 0 && !trusted && lastMsgOld {
 		p.net.delPeer(p)
 		close(p.sendCh)
+		close(p.recvCh)
 	}
 }
 
@@ -142,9 +147,45 @@ func (p *peer) SendMsg(msg *peering.PeerMessage) {
 	}
 }
 
+func (p *peer) RecvMsg(msg *peering.RecvEvent) {
+	catch := func() {
+		r := recover()
+		if err, ok := r.(error); ok && err.Error() == "send on closed channel" {
+			p.log.Warnf("Failed to receive message, reason=%v", err)
+			return
+		}
+		if r != nil {
+			p.log.Errorf("Failed to receive message, reason=%v", r)
+			panic(r)
+		}
+	}
+	//
+	defer catch()
+	select {
+	case p.recvCh <- msg:
+		return
+	default:
+		overflow := p.recvChOverflow.Inc()
+		p.log.Warnf("Receive channel from %v overflown by %v", p.remoteNetID, overflow)
+		go func() {
+			defer catch()
+			p.recvCh <- msg
+			if overflow := p.recvChOverflow.Dec(); overflow == 0 {
+				p.log.Warnf("Receive channel from %v is not overflown anymore.", p.remoteNetID)
+			}
+		}()
+	}
+}
+
 func (p *peer) sendLoop() {
 	for msg := range p.sendCh {
 		p.sendMsgDirect(msg)
+	}
+}
+
+func (p *peer) recvLoop() {
+	for msg := range p.recvCh {
+		p.net.triggerRecvEvents(msg)
 	}
 }
 
