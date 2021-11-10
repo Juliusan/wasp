@@ -20,12 +20,16 @@ import (
 	"github.com/iotaledger/wasp/packages/tcrypto"
 	"github.com/iotaledger/wasp/packages/util/ready"
 	"github.com/iotaledger/wasp/packages/vm/processors"
+	"go.dedis.ch/kyber/v3/sign/tbls"
 )
 
 type ChainCore interface {
 	ID() *iscp.ChainID
 	GetCommitteeInfo() *CommitteeInfo
-	AttachToPeerMessages(fun func(recv *peering.RecvEvent))
+	RegisterPeerMessageParty(party peering.PeerMessageSimpleParty) error
+	UnregisterPeerMessageParty(partyType peering.PeerMessagePartyType) error
+	SendMsgByNetID(netID string, destinationParty peering.PeerMessagePartyType, msg peering.Serializable)
+	SendMsgToRandomPeers(upToNumPeers uint16, destinationParty peering.PeerMessagePartyType, msg peering.Serializable)
 	StateCandidateToStateManager(state.VirtualStateAccess, ledgerstate.OutputID)
 	Events() ChainEvents
 	Processors() *processors.Cache
@@ -74,12 +78,13 @@ type Committee interface {
 	Quorum() uint16
 	OwnPeerIndex() uint16
 	DKShare() *tcrypto.DKShare
-	SendMsg(targetPeerIndex uint16, msgType byte, msgData []byte) error
-	SendMsgToPeers(msgType byte, msgData []byte, ts int64, except ...uint16)
+	RegisterPeerMessageParty(party peering.PeerMessageGroupParty) error
+	UnregisterPeerMessageParty(partyType peering.PeerMessagePartyType) error
+	SendMsgByIndex(targetPeerIndex uint16, destinationParty peering.PeerMessagePartyType, msg peering.Serializable) error
+	SendMsgToPeers(destinationParty peering.PeerMessagePartyType, msg peering.Serializable, except ...uint16)
 	IsAlivePeer(peerIndex uint16) bool
 	QuorumIsAlive(quorum ...uint16) bool
 	PeerStatus() []*PeerStatus
-	AttachToPeerMessages(fun func(recv *peering.RecvEvent))
 	IsReady() bool
 	Close()
 	RunACSConsensus(value []byte, sessionID uint64, stateIndex uint32, callback func(sessionID uint64, acs [][]byte))
@@ -98,8 +103,8 @@ type NodeConnection interface {
 
 type StateManager interface {
 	Ready() *ready.Ready
-	EventGetBlockMsg(msg *messages.GetBlockMsg)
-	EventBlockMsg(msg *messages.BlockMsg)
+	EnqueueGetBlock(index uint32, senderNetID string)
+	EnqueueBlock(block []byte, senderNetID string)
 	EventStateMsg(msg *messages.StateMsg)
 	EventOutputMsg(msg ledgerstate.Output)
 	EventStateCandidateMsg(state.VirtualStateAccess, ledgerstate.OutputID)
@@ -110,8 +115,8 @@ type StateManager interface {
 
 type Consensus interface {
 	EventStateTransitionMsg(state.VirtualStateAccess, *ledgerstate.AliasOutput, time.Time)
-	EventSignedResultMsg(*messages.SignedResultMsg)
-	EventSignedResultAckMsg(*messages.SignedResultAckMsg)
+	EnqueueSignedResult(chainInputID ledgerstate.OutputID, essenceHash hashing.HashValue, sigShare tbls.SigShare, senderIndex uint16)
+	EnqueueSignedResultAck(chainInputID ledgerstate.OutputID, essenceHash hashing.HashValue, senderIndex uint16)
 	EventInclusionsStateMsg(ledgerstate.TransactionID, ledgerstate.InclusionState)
 	EventAsynchronousCommonSubsetMsg(msg *messages.AsynchronousCommonSubsetMsg)
 	EventVMResultMsg(msg *messages.VMResultMsg)
@@ -138,7 +143,6 @@ type Mempool interface {
 
 type AsynchronousCommonSubsetRunner interface {
 	RunACSConsensus(value []byte, sessionID uint64, stateIndex uint32, callback func(sessionID uint64, acs [][]byte))
-	TryHandleMessage(recv *peering.RecvEvent) bool
 	Close()
 }
 

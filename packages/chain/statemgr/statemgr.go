@@ -6,7 +6,6 @@
 package statemgr
 
 import (
-	"bytes"
 	"fmt"
 	"time"
 
@@ -38,8 +37,8 @@ type stateManager struct {
 	log                    *logger.Logger
 
 	// Channels for accepting external events.
-	eventGetBlockMsgCh       chan *messages.GetBlockMsg
-	eventBlockMsgCh          chan *messages.BlockMsg
+	eventGetBlockMsgCh       chan *getBlockMsgIn
+	eventBlockMsgCh          chan *blockMsgIn
 	eventStateOutputMsgCh    chan *messages.StateMsg
 	eventOutputMsgCh         chan ledgerstate.Output
 	eventStateCandidateMsgCh chan *messages.StateCandidateMsg
@@ -47,7 +46,17 @@ type stateManager struct {
 	closeCh                  chan bool
 }
 
+var _ chain.StateManager = &stateManager{}
+var _ peering.PeerMessageSimpleParty = &stateManager{}
+
+type stateManagerMessageType byte
+
 const (
+	stateManagerMessageTypeStart stateManagerMessageType = iota
+	stateManagerMessageTypeGetBlock
+	stateManagerMessageTypeBlock
+	stateManagerMessageTypeEnd
+
 	numberOfNodesToRequestBlockFromConst = 5
 	maxBlocksToCommitConst               = 10000 // 10k
 )
@@ -69,43 +78,30 @@ func New(store kvstore.KVStore, c chain.ChainCore, peers peering.PeerDomainProvi
 		timers:                   timers,
 		log:                      c.Log().Named("s"),
 		pullStateRetryTime:       time.Now(),
-		eventGetBlockMsgCh:       make(chan *messages.GetBlockMsg),
-		eventBlockMsgCh:          make(chan *messages.BlockMsg),
+		eventGetBlockMsgCh:       make(chan *getBlockMsgIn),
+		eventBlockMsgCh:          make(chan *blockMsgIn),
 		eventStateOutputMsgCh:    make(chan *messages.StateMsg),
 		eventOutputMsgCh:         make(chan ledgerstate.Output),
 		eventStateCandidateMsgCh: make(chan *messages.StateCandidateMsg),
 		eventTimerMsgCh:          make(chan messages.TimerTick),
 		closeCh:                  make(chan bool),
 	}
-	c.AttachToPeerMessages(ret.receiveChainPeerMessages)
+	c.RegisterPeerMessageParty(ret)
 	go ret.initLoadState()
 
 	return ret
 }
 
-func (sm *stateManager) receiveChainPeerMessages(event *peering.RecvEvent) {
-	msg := event.Msg
-	switch msg.MsgType {
-	case messages.MsgGetBlock:
-		msgt := &messages.GetBlockMsg{}
-		rdr := bytes.NewReader(msg.MsgData)
-		if err := msgt.Read(rdr); err != nil {
-			sm.log.Error(err)
-			return
-		}
-		msgt.SenderNetID = msg.SenderNetID
-		sm.EventGetBlockMsg(msgt)
-	case messages.MsgBlock:
-		msgt := &messages.BlockMsg{}
-		rdr := bytes.NewReader(msg.MsgData)
-		if err := msgt.Read(rdr); err != nil {
-			sm.log.Error(err)
-			return
-		}
-		msgt.SenderNetID = msg.SenderNetID
-		sm.EventBlockMsg(msgt)
-	default:
-		return
+func (sm *stateManager) GetPartyType() peering.PeerMessagePartyType {
+	return peering.PeerMessagePartyStateManager
+}
+
+func (sm *stateManager) HandleMessage(senderNetID string, msg peering.Serializable) {
+	switch msgt := msg.(type) {
+	case *getBlockMsg:
+		sm.EnqueueGetBlock(msgt.BlockIndex, senderNetID)
+	case *blockMsg:
+		sm.EnqueueBlock(msgt.BlockBytes, senderNetID)
 	}
 }
 
@@ -166,11 +162,11 @@ func (sm *stateManager) recvLoop() {
 		select {
 		case msg, ok := <-sm.eventGetBlockMsgCh:
 			if ok {
-				sm.eventGetBlockMsg(msg)
+				sm.handleGetBlock(msg)
 			}
 		case msg, ok := <-sm.eventBlockMsgCh:
 			if ok {
-				sm.eventBlockMsg(msg)
+				sm.handleBlock(msg)
 			}
 		case msg, ok := <-sm.eventStateOutputMsgCh:
 			if ok {

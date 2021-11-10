@@ -4,7 +4,6 @@
 package consensus
 
 import (
-	"bytes"
 	"sync"
 	"time"
 
@@ -21,6 +20,16 @@ import (
 	"github.com/iotaledger/wasp/packages/vm"
 	"github.com/iotaledger/wasp/packages/vm/runvm"
 	"go.uber.org/atomic"
+)
+
+type consensusMessageType byte
+
+const (
+	consensusMessageTypeStart consensusMessageType = iota
+	consensusMessageTypeMissingRequestIDs
+	consensusMessageTypeSignerResult
+	consensusMessageTypeSignerResultAck
+	consensusMessageTypeEnd
 )
 
 type Consensus struct {
@@ -45,7 +54,7 @@ type Consensus struct {
 	delaySendingSignedResult         time.Time
 	resultTxEssence                  *ledgerstate.TransactionEssence
 	resultState                      state.VirtualStateAccess
-	resultSignatures                 []*messages.SignedResultMsg
+	resultSignatures                 []*signedResultMsgIn
 	resultSigAck                     []uint16
 	finalTx                          *ledgerstate.Transaction
 	postTxDeadline                   time.Time
@@ -55,8 +64,8 @@ type Consensus struct {
 	timers                           ConsensusTimers
 	log                              *logger.Logger
 	eventStateTransitionMsgCh        chan *messages.StateTransitionMsg
-	eventSignedResultMsgCh           chan *messages.SignedResultMsg
-	eventSignedResultAckMsgCh        chan *messages.SignedResultAckMsg
+	eventSignedResultMsgCh           chan *signedResultMsgIn
+	eventSignedResultAckMsgCh        chan *signedResultAckMsgIn
 	eventInclusionStateMsgCh         chan *messages.InclusionStateMsg
 	eventACSMsgCh                    chan *messages.AsynchronousCommonSubsetMsg
 	eventVMResultMsgCh               chan *messages.VMResultMsg
@@ -82,6 +91,7 @@ type workflowFlags struct {
 }
 
 var _ chain.Consensus = &Consensus{}
+var _ peering.PeerMessageGroupParty = &Consensus{}
 
 func New(chainCore chain.ChainCore, mempool chain.Mempool, committee chain.Committee, nodeConn chain.NodeConnection, pullMissingRequestsFromCommittee bool, consensusMetrics metrics.ConsensusMetrics, timersOpt ...ConsensusTimers) *Consensus {
 	var timers ConsensusTimers
@@ -97,13 +107,13 @@ func New(chainCore chain.ChainCore, mempool chain.Mempool, committee chain.Commi
 		mempool:                          mempool,
 		nodeConn:                         nodeConn,
 		vmRunner:                         runvm.NewVMRunner(),
-		resultSignatures:                 make([]*messages.SignedResultMsg, committee.Size()),
+		resultSignatures:                 make([]*signedResultMsgIn, committee.Size()),
 		resultSigAck:                     make([]uint16, 0, committee.Size()),
 		timers:                           timers,
 		log:                              log,
 		eventStateTransitionMsgCh:        make(chan *messages.StateTransitionMsg),
-		eventSignedResultMsgCh:           make(chan *messages.SignedResultMsg),
-		eventSignedResultAckMsgCh:        make(chan *messages.SignedResultAckMsg),
+		eventSignedResultMsgCh:           make(chan *signedResultMsgIn),
+		eventSignedResultAckMsgCh:        make(chan *signedResultAckMsgIn),
 		eventInclusionStateMsgCh:         make(chan *messages.InclusionStateMsg),
 		eventACSMsgCh:                    make(chan *messages.AsynchronousCommonSubsetMsg),
 		eventVMResultMsgCh:               make(chan *messages.VMResultMsg),
@@ -113,35 +123,22 @@ func New(chainCore chain.ChainCore, mempool chain.Mempool, committee chain.Commi
 		pullMissingRequestsFromCommittee: pullMissingRequestsFromCommittee,
 		consensusMetrics:                 consensusMetrics,
 	}
-	committee.AttachToPeerMessages(ret.receiveCommitteePeerMessages)
+	committee.RegisterPeerMessageParty(ret)
 	ret.refreshConsensusInfo()
 	go ret.recvLoop()
 	return ret
 }
 
-func (c *Consensus) receiveCommitteePeerMessages(event *peering.RecvEvent) {
-	msg := event.Msg
-	switch msg.MsgType {
-	case messages.MsgSignedResult:
-		msgt := &messages.SignedResultMsg{}
-		rdr := bytes.NewReader(msg.MsgData)
-		if err := msgt.Read(rdr); err != nil {
-			c.log.Error(err)
-			return
-		}
-		msgt.SenderIndex = msg.SenderIndex
-		c.EventSignedResultMsg(msgt)
-	case messages.MsgSignedResultAck:
-		msgt := &messages.SignedResultAckMsg{}
-		rdr := bytes.NewReader(msg.MsgData)
-		if err := msgt.Read(rdr); err != nil {
-			c.log.Error(err)
-			return
-		}
-		msgt.SenderIndex = msg.SenderIndex
-		c.EventSignedResultAckMsg(msgt)
-	default:
-		return
+func (c *Consensus) GetPartyType() peering.PeerMessagePartyType {
+	return peering.PeerMessagePartyConsensus
+}
+
+func (c *Consensus) HandleGroupMessage(senderNetID string, senderIndex uint16, msg peering.Serializable) {
+	switch msgt := msg.(type) {
+	case *signedResultMsg:
+		c.EnqueueSignedResult(msgt.ChainInputID, msgt.EssenceHash, msgt.SigShare, senderIndex)
+	case *signedResultAckMsg:
+		c.EnqueueSignedResultAck(msgt.ChainInputID, msgt.EssenceHash, senderIndex)
 	}
 }
 
@@ -175,13 +172,13 @@ func (c *Consensus) recvLoop() {
 		case msg, ok := <-c.eventSignedResultMsgCh:
 			if ok {
 				c.log.Debugf("Consensus::recvLoop, eventSignedResult...")
-				c.eventSignedResult(msg)
+				c.handleSignedResult(msg)
 				c.log.Debugf("Consensus::recvLoop, eventSignedResult... Done")
 			}
 		case msg, ok := <-c.eventSignedResultAckMsgCh:
 			if ok {
 				c.log.Debugf("Consensus::recvLoop, eventSignedResultAck...")
-				c.eventSignedResultAck(msg)
+				c.handleSignedResultAck(msg)
 				c.log.Debugf("Consensus::recvLoop, eventSignedResultAck... Done")
 			}
 		case msg, ok := <-c.eventInclusionStateMsgCh:

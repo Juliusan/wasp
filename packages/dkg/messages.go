@@ -12,17 +12,16 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"time"
+	//	"time"
 
 	"github.com/iotaledger/goshimmer/packages/ledgerstate"
-	"github.com/iotaledger/hive.go/crypto/ed25519"
+	//	"github.com/iotaledger/hive.go/crypto/ed25519"
 	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/util"
 	"go.dedis.ch/kyber/v3"
 	"go.dedis.ch/kyber/v3/share"
 	rabin_dkg "go.dedis.ch/kyber/v3/share/dkg/rabin"
 	rabin_vss "go.dedis.ch/kyber/v3/share/vss/rabin"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -104,14 +103,15 @@ func makeDkgRoundMsg(msgType byte) (byte, error) { //nolint:unused,deadcode
 
 // All the messages exchanged via the Peering subsystem will implement this.
 type msgByteCoder interface {
-	MsgType() byte
-	Step() byte
+	//	MsgType() byte
+	//	Step() byte
 	SetStep(step byte)
-	Write(io.Writer) error
-	Read(io.Reader) error
+	//	Write(io.Writer) error
+	//	Read(io.Reader) error
+	peering.Serializable
 }
 
-func makePeerMessage(peeringID peering.PeeringID, step byte, msg msgByteCoder) *peering.PeerMessage {
+/*func makePeerMessage(peeringID peering.PeeringID, step byte, msg msgByteCoder) *peering.PeerMessage {
 	msg.SetStep(step)
 	return &peering.PeerMessage{
 		PeeringID:   peeringID,
@@ -120,7 +120,7 @@ func makePeerMessage(peeringID peering.PeeringID, step byte, msg msgByteCoder) *
 		MsgType:     msg.MsgType(),
 		MsgData:     util.MustBytes(msg),
 	}
-}
+}*/
 
 // All the messages in this module have a step as a first byte in the payload.
 // This function reads that step without decoding all the data.
@@ -169,249 +169,6 @@ func readInitiatorMsg(peerMessage *peering.PeerMessage, blsSuite kyber.Group) (b
 	default:
 		return false, nil, nil
 	}
-}
-
-//
-// initiatorInitMsg
-//
-// This is a message sent by the initiator to all the peers to
-// initiate the DKG process.
-//
-type initiatorInitMsg struct {
-	step         byte
-	dkgRef       string // Some unique string to identify duplicate initialization.
-	peerNetIDs   []string
-	peerPubs     []ed25519.PublicKey
-	initiatorPub ed25519.PublicKey
-	threshold    uint16
-	timeout      time.Duration
-	roundRetry   time.Duration
-}
-
-func (m *initiatorInitMsg) MsgType() byte {
-	return initiatorInitMsgType
-}
-
-func (m *initiatorInitMsg) Step() byte {
-	return m.step
-}
-
-func (m *initiatorInitMsg) SetStep(step byte) {
-	m.step = step
-}
-
-//nolint:gocritic
-func (m *initiatorInitMsg) Write(w io.Writer) error {
-	var err error
-	if err = util.WriteByte(w, m.step); err != nil {
-		return err
-	}
-	if err = util.WriteString16(w, m.dkgRef); err != nil {
-		return err
-	}
-	if err = util.WriteStrings16(w, m.peerNetIDs); err != nil {
-		return err
-	}
-	if err = util.WriteUint16(w, uint16(len(m.peerPubs))); err != nil {
-		return err
-	}
-	for i := range m.peerPubs {
-		if err = util.WriteBytes16(w, m.peerPubs[i].Bytes()); err != nil {
-			return err
-		}
-	}
-	if err = util.WriteBytes16(w, m.initiatorPub.Bytes()); err != nil {
-		return err
-	}
-	if err = util.WriteUint16(w, m.threshold); err != nil {
-		return err
-	}
-	if err = util.WriteInt64(w, m.timeout.Milliseconds()); err != nil {
-		return err
-	}
-	return util.WriteInt64(w, m.roundRetry.Milliseconds())
-}
-
-//nolint:gocritic
-func (m *initiatorInitMsg) Read(r io.Reader) error {
-	var err error
-	if m.step, err = util.ReadByte(r); err != nil {
-		return err
-	}
-	if m.dkgRef, err = util.ReadString16(r); err != nil {
-		return err
-	}
-	if m.peerNetIDs, err = util.ReadStrings16(r); err != nil {
-		return err
-	}
-	var arrLen uint16
-	if err = util.ReadUint16(r, &arrLen); err != nil {
-		return err
-	}
-	m.peerPubs = make([]ed25519.PublicKey, arrLen)
-	for i := range m.peerPubs {
-		var peerPubBytes []byte
-		if peerPubBytes, err = util.ReadBytes16(r); err != nil {
-			return err
-		}
-		if m.peerPubs[i], _, err = ed25519.PublicKeyFromBytes(peerPubBytes); err != nil {
-			return err
-		}
-	}
-	var initiatorPubBytes []byte
-	if initiatorPubBytes, err = util.ReadBytes16(r); err != nil {
-		return err
-	}
-	if m.initiatorPub, _, err = ed25519.PublicKeyFromBytes(initiatorPubBytes); err != nil {
-		return err
-	}
-	if err = util.ReadUint16(r, &m.threshold); err != nil {
-		return err
-	}
-	var timeoutMS int64
-	if err = util.ReadInt64(r, &timeoutMS); err != nil {
-		return err
-	}
-	m.timeout = time.Duration(timeoutMS) * time.Millisecond
-	var roundRetryMS int64
-	if err = util.ReadInt64(r, &roundRetryMS); err != nil {
-		return err
-	}
-	m.roundRetry = time.Duration(roundRetryMS) * time.Millisecond
-	return nil
-}
-
-func (m *initiatorInitMsg) fromBytes(buf []byte) error {
-	r := bytes.NewReader(buf)
-	return m.Read(r)
-}
-
-func (m *initiatorInitMsg) Error() error {
-	return nil
-}
-
-func (m *initiatorInitMsg) IsResponse() bool {
-	return false
-}
-
-//
-// initiatorStepMsg
-//
-// This is a message used to synchronize the DKG procedure by
-// ensuring the lock-step, as required by the DKG algorithm
-// assumptions (Rabin as well as Pedersen).
-//
-type initiatorStepMsg struct {
-	step byte
-}
-
-func (m *initiatorStepMsg) MsgType() byte {
-	return initiatorStepMsgType
-}
-
-func (m *initiatorStepMsg) Step() byte {
-	return m.step
-}
-
-func (m *initiatorStepMsg) SetStep(step byte) {
-	m.step = step
-}
-
-func (m *initiatorStepMsg) Write(w io.Writer) error {
-	return util.WriteByte(w, m.step)
-}
-
-func (m *initiatorStepMsg) Read(r io.Reader) error {
-	var err error
-	if m.step, err = util.ReadByte(r); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (m *initiatorStepMsg) fromBytes(buf []byte) error {
-	r := bytes.NewReader(buf)
-	return m.Read(r)
-}
-
-func (m *initiatorStepMsg) Error() error {
-	return nil
-}
-
-func (m *initiatorStepMsg) IsResponse() bool {
-	return false
-}
-
-//
-// initiatorDoneMsg
-//
-type initiatorDoneMsg struct {
-	step      byte
-	pubShares []kyber.Point
-	blsSuite  kyber.Group // Transient, for un-marshaling only.
-}
-
-func (m *initiatorDoneMsg) MsgType() byte {
-	return initiatorDoneMsgType
-}
-
-func (m *initiatorDoneMsg) Step() byte {
-	return m.step
-}
-
-func (m *initiatorDoneMsg) SetStep(step byte) {
-	m.step = step
-}
-
-//nolint:gocritic
-func (m *initiatorDoneMsg) Write(w io.Writer) error {
-	var err error
-	if err = util.WriteByte(w, m.step); err != nil {
-		return err
-	}
-	if err = util.WriteUint16(w, uint16(len(m.pubShares))); err != nil {
-		return err
-	}
-	for i := range m.pubShares {
-		if err = util.WriteMarshaled(w, m.pubShares[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-//nolint:gocritic
-func (m *initiatorDoneMsg) Read(r io.Reader) error {
-	var err error
-	if m.step, err = util.ReadByte(r); err != nil {
-		return err
-	}
-	var arrLen uint16
-	if err = util.ReadUint16(r, &arrLen); err != nil {
-		return err
-	}
-	m.pubShares = make([]kyber.Point, arrLen)
-	for i := range m.pubShares {
-		m.pubShares[i] = m.blsSuite.Point()
-		if err = util.ReadMarshaled(r, m.pubShares[i]); err != nil {
-			return xerrors.Errorf("failed to unmarshal initiatorDoneMsg.pubShares: %w", err)
-		}
-	}
-	return nil
-}
-
-func (m *initiatorDoneMsg) fromBytes(buf []byte, blsSuite kyber.Group) error {
-	r := bytes.NewReader(buf)
-	m.blsSuite = blsSuite
-	return m.Read(r)
-}
-
-func (m *initiatorDoneMsg) Error() error {
-	return nil
-}
-
-func (m *initiatorDoneMsg) IsResponse() bool {
-	return false
 }
 
 //
@@ -499,67 +256,6 @@ func (m *initiatorPubShareMsg) Error() error {
 }
 
 func (m *initiatorPubShareMsg) IsResponse() bool {
-	return true
-}
-
-//
-// initiatorStatusMsg
-//
-type initiatorStatusMsg struct {
-	step  byte
-	error error
-}
-
-func (m *initiatorStatusMsg) MsgType() byte {
-	return initiatorStatusMsgType
-}
-
-func (m *initiatorStatusMsg) Step() byte {
-	return m.step
-}
-
-func (m *initiatorStatusMsg) SetStep(step byte) {
-	m.step = step
-}
-
-func (m *initiatorStatusMsg) Write(w io.Writer) error {
-	if err := util.WriteByte(w, m.step); err != nil {
-		return err
-	}
-	var errMsg string
-	if m.error != nil {
-		errMsg = m.error.Error()
-	}
-	return util.WriteString16(w, errMsg)
-}
-
-func (m *initiatorStatusMsg) Read(r io.Reader) error {
-	var err error
-	if m.step, err = util.ReadByte(r); err != nil {
-		return err
-	}
-	var errMsg string
-	if errMsg, err = util.ReadString16(r); err != nil {
-		return err
-	}
-	if errMsg != "" {
-		m.error = errors.New(errMsg)
-	} else {
-		m.error = nil
-	}
-	return nil
-}
-
-func (m *initiatorStatusMsg) fromBytes(buf []byte) error {
-	r := bytes.NewReader(buf)
-	return m.Read(r)
-}
-
-func (m *initiatorStatusMsg) Error() error {
-	return m.error
-}
-
-func (m *initiatorStatusMsg) IsResponse() bool {
 	return true
 }
 

@@ -47,8 +47,8 @@ func TestDomainProvider(t *testing.T) {
 	require.NotNil(t, d)
 
 	msg := &peering.PeerMessage{PeeringID: peering.RandomPeeringID(), MsgType: 125}
-	d.SendMsgByNetID(netIDs[0], msg)
-	d.SendMsgByNetID(netIDs[2], msg)
+	d.sendMsgByNetID(netIDs[0], msg)
+	d.sendMsgByNetID(netIDs[2], msg)
 	<-doneCh0
 	<-doneCh2
 	//

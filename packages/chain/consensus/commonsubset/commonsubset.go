@@ -31,26 +31,22 @@
 package commonsubset
 
 import (
-	"bytes"
 	"encoding/binary"
-	"io"
 	"time"
 
 	"github.com/anthdm/hbbft"
 	"github.com/iotaledger/hive.go/logger"
+	"github.com/iotaledger/wasp/packages/chain"
 	"github.com/iotaledger/wasp/packages/chain/consensus/commoncoin"
 	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/tcrypto"
-	"github.com/iotaledger/wasp/packages/util"
 	"golang.org/x/xerrors"
 )
 
 const (
-	acsMsgType   = 50 + peering.FirstUserMsgCode
+	acsMsgType   = iota
 	resendPeriod = 500 * time.Millisecond
 )
-
-// region CommonSubset /////////////////////////////////////////////////////////
 
 // CommonSubject is responsible for executing a single instance of agreement.
 // The main task for this object is to manage all the redeliveries and acknowledgements.
@@ -63,11 +59,10 @@ type CommonSubset struct {
 	recvMsgBatches []map[uint32]uint32  // [PeerId]ReceivedMbID -> AckedInMb (0 -- unacked). It remains 0, if acked in non-data message.
 	sentMsgBatches map[uint32]*msgBatch // BatchID -> MsgBatch
 
-	sessionID   uint64                // Unique identifier for this consensus instance. Used to route messages.
-	stateIndex  uint32                // Sequence number of the CS transaction we are agreeing on.
-	peeringID   peering.PeeringID     // ID for the communication group.
-	netGroup    peering.GroupProvider // Group of nodes we are communicating with.
-	netOwnIndex uint16                // Our index in the group.
+	sessionID   uint64 // Unique identifier for this consensus instance. Used to route messages.
+	stateIndex  uint32 // Sequence number of the CS transaction we are agreeing on.
+	committee   chain.Committee
+	netOwnIndex uint16 // Our index in the group.
 
 	inputCh  chan []byte            // For our input to the consensus.
 	recvCh   chan *msgBatch         // For incoming messages.
@@ -80,7 +75,7 @@ type CommonSubset struct {
 func NewCommonSubset(
 	sessionID uint64,
 	stateIndex uint32,
-	peeringID peering.PeeringID,
+	committee chain.Committee,
 	netGroup peering.GroupProvider,
 	dkShare *tcrypto.DKShare,
 	allRandom bool, // Set to true to have real CC rounds for each epoch. That's for testing mostly.
@@ -118,8 +113,7 @@ func NewCommonSubset(
 		sentMsgBatches: make(map[uint32]*msgBatch),
 		sessionID:      sessionID,
 		stateIndex:     stateIndex,
-		peeringID:      peeringID,
-		netGroup:       netGroup,
+		committee:      committee,
 		netOwnIndex:    ownIndex,
 		inputCh:        make(chan []byte, 1),
 		recvCh:         make(chan *msgBatch, 1),
@@ -147,26 +141,10 @@ func (cs *CommonSubset) Input(input []byte) {
 	cs.inputCh <- input
 }
 
-// TryHandleMessage checks, if the RecvEvent is of suitable type and
-// processed the message as an input from a peer if the type matches.
-// This one is called from the ACS tests.
-func (cs *CommonSubset) TryHandleMessage(recv *peering.RecvEvent) bool {
-	if recv.Msg.MsgType != acsMsgType {
-		return false
-	}
-	mb := msgBatch{}
-	if err := mb.FromBytes(recv.Msg.MsgData); err != nil {
-		cs.log.Errorf("Cannot decode message: %v", err)
-		return true
-	}
-	cs.HandleMsgBatch(&mb)
-	return true
-}
-
 // HandleMsgBatch accepts a parsed msgBatch as an input from other node.
 // This function is used in the CommonSubsetCoordinator to avoid parsing
 // the received message multiple times.
-func (cs *CommonSubset) HandleMsgBatch(mb *msgBatch) {
+func (cs *CommonSubset) HandleMsgBatch(msg peering.Serializable) {
 	defer func() {
 		if err := recover(); err != nil {
 			// Just to avoid panics on writing to a closed channel.
@@ -174,7 +152,7 @@ func (cs *CommonSubset) HandleMsgBatch(mb *msgBatch) {
 			cs.log.Warnf("Dropping msgBatch reason=%v", err)
 		}
 	}()
-	cs.recvCh <- mb
+	cs.recvCh <- msg.(*msgBatch)
 }
 
 func (cs *CommonSubset) Close() {
@@ -396,359 +374,5 @@ func (cs *CommonSubset) send(msgBatch *msgBatch) {
 		return
 	}
 	cs.log.Debugf("ACS::IO - Sending a msgBatch=%+v", msgBatch)
-	cs.netGroup.SendMsgByIndex(msgBatch.dst, &peering.PeerMessage{
-		PeeringID:   cs.peeringID,
-		SenderIndex: cs.netOwnIndex,
-		Timestamp:   0,
-		MsgType:     acsMsgType,
-		MsgData:     msgBatch.Bytes(),
-	})
+	cs.committee.SendMsgByIndex(msgBatch.dst, peering.PeerMessagePartyAcs, msgBatch)
 }
-
-// endregion ///////////////////////////////////////////////////////////////////
-
-// region msgBatch /////////////////////////////////////////////////////////////
-
-/** msgBatch groups messages generated at one step in the protocol for a single recipient. */
-type msgBatch struct {
-	sessionID  uint64
-	stateIndex uint32
-	id         uint32              // ID of the batch for the acks, ID=0 => Acks are not needed.
-	src        uint16              // Sender of the batch.
-	dst        uint16              // Recipient of the batch.
-	msgs       []*hbbft.ACSMessage // New messages to send.
-	acks       []uint32            // Acknowledgements.
-}
-
-const (
-	acsMsgTypeRbcProofRequest byte = 1 << 4
-	acsMsgTypeRbcEchoRequest  byte = 2 << 4
-	acsMsgTypeRbcReadyRequest byte = 3 << 4
-	acsMsgTypeAbaBvalRequest  byte = 4 << 4
-	acsMsgTypeAbaAuxRequest   byte = 5 << 4
-	acsMsgTypeAbaCCRequest    byte = 6 << 4
-	acsMsgTypeAbaDoneRequest  byte = 7 << 4
-)
-
-func (b *msgBatch) NeedsAck() bool {
-	return b.id != 0
-}
-
-//nolint:funlen, gocyclo // TODO this function is too long and has a high cyclomatic complexity, should be refactored
-func (b *msgBatch) Write(w io.Writer) error {
-	var err error
-	if err = util.WriteUint64(w, b.sessionID); err != nil {
-		return xerrors.Errorf("failed to write msgBatch.sessionID: %w", err)
-	}
-	if err = util.WriteUint32(w, b.stateIndex); err != nil {
-		return xerrors.Errorf("failed to write msgBatch.stateIndex: %w", err)
-	}
-	if err = util.WriteUint32(w, b.id); err != nil {
-		return xerrors.Errorf("failed to write msgBatch.id: %w", err)
-	}
-	if err = util.WriteUint16(w, b.src); err != nil {
-		return xerrors.Errorf("failed to write msgBatch.src: %w", err)
-	}
-	if err = util.WriteUint16(w, b.dst); err != nil {
-		return xerrors.Errorf("failed to write msgBatch.dst: %w", err)
-	}
-	if err = util.WriteUint16(w, uint16(len(b.msgs))); err != nil {
-		return xerrors.Errorf("failed to write msgBatch.msgs.len: %w", err)
-	}
-	for i, acsMsg := range b.msgs {
-		if err = util.WriteUint16(w, uint16(acsMsg.ProposerID)); err != nil {
-			return xerrors.Errorf("failed to write msgBatch.msgs[%v].ProposerID: %w", i, err)
-		}
-		switch acsMsgPayload := acsMsg.Payload.(type) {
-		case *hbbft.BroadcastMessage:
-			switch rbcMsgPayload := acsMsgPayload.Payload.(type) {
-			case *hbbft.ProofRequest:
-				if err = util.WriteByte(w, acsMsgTypeRbcProofRequest); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].type: %w", i, err)
-				}
-				if err = util.WriteBytes16(w, rbcMsgPayload.RootHash); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].RootHash: %w", i, err)
-				}
-				if err = util.WriteUint32(w, uint32(len(rbcMsgPayload.Proof))); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].Proof.len: %w", i, err)
-				}
-				for pi, p := range rbcMsgPayload.Proof {
-					if err = util.WriteBytes32(w, p); err != nil {
-						return xerrors.Errorf("failed to write msgBatch.msgs[%v].Proof[%v]: %w", i, pi, err)
-					}
-				}
-				if err = util.WriteUint16(w, uint16(rbcMsgPayload.Index)); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].Index: %w", i, err)
-				}
-				if err = util.WriteUint16(w, uint16(rbcMsgPayload.Leaves)); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].Leaves: %w", i, err)
-				}
-			case *hbbft.EchoRequest:
-				if err = util.WriteByte(w, acsMsgTypeRbcEchoRequest); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].type: %w", i, err)
-				}
-				if err = util.WriteBytes16(w, rbcMsgPayload.RootHash); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].RootHash: %w", i, err)
-				}
-				if err = util.WriteUint32(w, uint32(len(rbcMsgPayload.Proof))); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].Proof.len: %w", i, err)
-				}
-				for pi, p := range rbcMsgPayload.Proof {
-					if err = util.WriteBytes32(w, p); err != nil {
-						return xerrors.Errorf("failed to write msgBatch.msgs[%v].Proof[%v]: %w", i, pi, err)
-					}
-				}
-				if err = util.WriteUint16(w, uint16(rbcMsgPayload.Index)); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].Index: %w", i, err)
-				}
-				if err = util.WriteUint16(w, uint16(rbcMsgPayload.Leaves)); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].Leaves: %w", i, err)
-				}
-			case *hbbft.ReadyRequest:
-				if err = util.WriteByte(w, acsMsgTypeRbcReadyRequest); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].type: %w", i, err)
-				}
-				if err = util.WriteBytes16(w, rbcMsgPayload.RootHash); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].RootHash: %w", i, err)
-				}
-			default:
-				return xerrors.Errorf("failed to write msgBatch.msgs[%v]: unexpected broadcast message type", i)
-			}
-		case *hbbft.AgreementMessage:
-			switch abaMsgPayload := acsMsgPayload.Message.(type) {
-			case *hbbft.BvalRequest:
-				encoded := acsMsgTypeAbaBvalRequest
-				if abaMsgPayload.Value {
-					encoded |= 1
-				}
-				if err = util.WriteByte(w, encoded); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].value: %w", i, err)
-				}
-				if err = util.WriteUint16(w, uint16(acsMsgPayload.Epoch)); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].epoch: %w", i, err)
-				}
-			case *hbbft.AuxRequest:
-				encoded := acsMsgTypeAbaAuxRequest
-				if abaMsgPayload.Value {
-					encoded |= 1
-				}
-				if err = util.WriteByte(w, encoded); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].value: %w", i, err)
-				}
-				if err = util.WriteUint16(w, uint16(acsMsgPayload.Epoch)); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].epoch: %w", i, err)
-				}
-			case *hbbft.CCRequest:
-				coinMsg := abaMsgPayload.Payload.(*commoncoin.BlsCommonCoinMsg)
-				if err = util.WriteByte(w, acsMsgTypeAbaCCRequest); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].type: %w", i, err)
-				}
-				if err = util.WriteUint16(w, uint16(acsMsgPayload.Epoch)); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].epoch: %w", i, err)
-				}
-				if err = coinMsg.Write(w); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].Payload: %w", i, err)
-				}
-			case *hbbft.DoneRequest:
-				encoded := acsMsgTypeAbaDoneRequest
-				if err = util.WriteByte(w, encoded); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].type: %w", i, err)
-				}
-				if err = util.WriteUint16(w, uint16(acsMsgPayload.Epoch)); err != nil {
-					return xerrors.Errorf("failed to write msgBatch.msgs[%v].epoch: %w", i, err)
-				}
-			default:
-				return xerrors.Errorf("failed to write msgBatch.msgs[%v]: unexpected agreemet message type", i)
-			}
-		default:
-			return xerrors.Errorf("failed to write msgBatch.msgs[%v]: unexpected acs message type", i)
-		}
-	}
-	if err = util.WriteUint16(w, uint16(len(b.acks))); err != nil {
-		return xerrors.Errorf("failed to write msgBatch.acks.len: %w", err)
-	}
-	for i, ack := range b.acks {
-		if err = util.WriteUint32(w, ack); err != nil {
-			return xerrors.Errorf("failed to write msgBatch.acks[%v]: %w", i, err)
-		}
-	}
-	return nil
-}
-
-//nolint:funlen, gocyclo // TODO this function is too long and has a high cyclomatic complexity, should be refactored
-func (b *msgBatch) Read(r io.Reader) error {
-	var err error
-	if err = util.ReadUint64(r, &b.sessionID); err != nil {
-		return xerrors.Errorf("failed to read msgBatch.sessionID: %w", err)
-	}
-	if err = util.ReadUint32(r, &b.stateIndex); err != nil {
-		return xerrors.Errorf("failed to read msgBatch.stateIndex: %w", err)
-	}
-	if err = util.ReadUint32(r, &b.id); err != nil {
-		return xerrors.Errorf("failed to read msgBatch.id: %w", err)
-	}
-	if err = util.ReadUint16(r, &b.src); err != nil {
-		return xerrors.Errorf("failed to read msgBatch.src: %w", err)
-	}
-	if err = util.ReadUint16(r, &b.dst); err != nil {
-		return xerrors.Errorf("failed to read msgBatch.dst: %w", err)
-	}
-	//
-	// Msgs.
-	var msgsLen uint16
-	if err = util.ReadUint16(r, &msgsLen); err != nil {
-		return xerrors.Errorf("failed to read msgBatch.msgs.len: %w", err)
-	}
-	b.msgs = make([]*hbbft.ACSMessage, msgsLen)
-	for mi := range b.msgs {
-		acsMsg := hbbft.ACSMessage{}
-		b.msgs[mi] = &acsMsg
-		// ProposerID.
-		var proposerID uint16
-		if err = util.ReadUint16(r, &proposerID); err != nil {
-			return xerrors.Errorf("failed to read msgBatch.msgs[%v].ProposerID: %w", mi, err)
-		}
-		acsMsg.ProposerID = uint64(proposerID)
-		// By Type.
-		var msgType byte
-		if msgType, err = util.ReadByte(r); err != nil {
-			return xerrors.Errorf("failed to read msgBatch.msgs[%v].type: %w", mi, err)
-		}
-		switch msgType & 0xF0 {
-		case acsMsgTypeRbcProofRequest:
-			proofRequest := hbbft.ProofRequest{}
-			if proofRequest.RootHash, err = util.ReadBytes16(r); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].RootHash: %w", mi, err)
-			}
-			var proofLen uint32
-			if err = util.ReadUint32(r, &proofLen); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].Proof.len: %w", mi, err)
-			}
-			proofRequest.Proof = make([][]byte, proofLen)
-			for pi := range proofRequest.Proof {
-				if proofRequest.Proof[pi], err = util.ReadBytes32(r); err != nil {
-					return xerrors.Errorf("failed to read msgBatch.msgs[%v].Proof[%v]: %w", mi, pi, err)
-				}
-			}
-			var proofRequestIndex uint16
-			if err = util.ReadUint16(r, &proofRequestIndex); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].Index: %w", mi, err)
-			}
-			proofRequest.Index = int(proofRequestIndex)
-			var proofRequestLeaves uint16
-			if err = util.ReadUint16(r, &proofRequestLeaves); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].Leaves: %w", mi, err)
-			}
-			proofRequest.Leaves = int(proofRequestLeaves)
-			acsMsg.Payload = &hbbft.BroadcastMessage{
-				Payload: &proofRequest,
-			}
-		case acsMsgTypeRbcEchoRequest:
-			echoRequest := hbbft.EchoRequest{}
-			if echoRequest.RootHash, err = util.ReadBytes16(r); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].RootHash: %w", mi, err)
-			}
-			var proofLen uint32
-			if err = util.ReadUint32(r, &proofLen); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].Proof.len: %w", mi, err)
-			}
-			echoRequest.Proof = make([][]byte, proofLen)
-			for pi := range echoRequest.Proof {
-				if echoRequest.Proof[pi], err = util.ReadBytes32(r); err != nil {
-					return xerrors.Errorf("failed to read msgBatch.msgs[%v].Proof[%v]: %w", mi, pi, err)
-				}
-			}
-			var echoRequestIndex uint16
-			if err = util.ReadUint16(r, &echoRequestIndex); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].Index: %w", mi, err)
-			}
-			echoRequest.Index = int(echoRequestIndex)
-			var echoRequestLeaves uint16
-			if err = util.ReadUint16(r, &echoRequestLeaves); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].Leaves: %w", mi, err)
-			}
-			echoRequest.Leaves = int(echoRequestLeaves)
-			acsMsg.Payload = &hbbft.BroadcastMessage{
-				Payload: &echoRequest,
-			}
-		case acsMsgTypeRbcReadyRequest:
-			readyRequest := hbbft.ReadyRequest{}
-			if readyRequest.RootHash, err = util.ReadBytes16(r); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].RootHash: %w", mi, err)
-			}
-			acsMsg.Payload = &hbbft.BroadcastMessage{
-				Payload: &readyRequest,
-			}
-		case acsMsgTypeAbaBvalRequest:
-			var epoch uint16
-			if err = util.ReadUint16(r, &epoch); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].epoch: %w", mi, err)
-			}
-			acsMsg.Payload = &hbbft.AgreementMessage{
-				Epoch:   int(epoch),
-				Message: &hbbft.BvalRequest{Value: msgType&0x01 == 1},
-			}
-		case acsMsgTypeAbaAuxRequest:
-			var epoch uint16
-			if err = util.ReadUint16(r, &epoch); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].epoch: %w", mi, err)
-			}
-			acsMsg.Payload = &hbbft.AgreementMessage{
-				Epoch:   int(epoch),
-				Message: &hbbft.AuxRequest{Value: msgType&0x01 == 1},
-			}
-		case acsMsgTypeAbaCCRequest:
-			var epoch uint16
-			if err = util.ReadUint16(r, &epoch); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].epoch: %w", mi, err)
-			}
-			var ccReq commoncoin.BlsCommonCoinMsg
-			if err = ccReq.Read(r); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].Payload: %w", mi, err)
-			}
-			acsMsg.Payload = &hbbft.AgreementMessage{
-				Epoch: int(epoch),
-				Message: &hbbft.CCRequest{
-					Payload: &ccReq,
-				},
-			}
-		case acsMsgTypeAbaDoneRequest:
-			var epoch uint16
-			if err = util.ReadUint16(r, &epoch); err != nil {
-				return xerrors.Errorf("failed to read msgBatch.msgs[%v].epoch: %w", mi, err)
-			}
-			acsMsg.Payload = &hbbft.AgreementMessage{
-				Epoch:   int(epoch),
-				Message: &hbbft.DoneRequest{},
-			}
-		default:
-			return xerrors.Errorf("failed to read msgBatch.msgs[%v]: unexpected message type %v, b=%+v", mi, msgType, b)
-		}
-	}
-	//
-	// Acks.
-	var acksLen uint16
-	if err = util.ReadUint16(r, &acksLen); err != nil {
-		return xerrors.Errorf("failed to read msgBatch.acks.len: %w", err)
-	}
-	b.acks = make([]uint32, acksLen)
-	for ai := range b.acks {
-		if err = util.ReadUint32(r, &b.acks[ai]); err != nil {
-			return xerrors.Errorf("failed to read msgBatch.acks[%v]: %w", ai, err)
-		}
-	}
-	return nil
-}
-
-func (b *msgBatch) FromBytes(buf []byte) error {
-	r := bytes.NewReader(buf)
-	return b.Read(r)
-}
-
-func (b *msgBatch) Bytes() []byte {
-	var buf bytes.Buffer
-	_ = b.Write(&buf)
-	return buf.Bytes()
-}
-
-// endregion ///////////////////////////////////////////////////////////////////

@@ -17,6 +17,7 @@ import (
 	"github.com/iotaledger/wasp/packages/iscp/request"
 	"github.com/iotaledger/wasp/packages/iscp/rotate"
 	"github.com/iotaledger/wasp/packages/kv/dict"
+	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/transaction"
 	"github.com/iotaledger/wasp/packages/util"
 	"github.com/iotaledger/wasp/packages/vm"
@@ -164,16 +165,17 @@ func (c *Consensus) pollMissingRequests(missingRequestIndexes []int) {
 	if !c.pullMissingRequestsFromCommittee {
 		return
 	}
-	missingRequestIds := []iscp.RequestID{}
+	missingRequestIDs := []iscp.RequestID{}
 	for _, idx := range missingRequestIndexes {
 		reqID := c.consensusBatch.RequestIDs[idx]
 		reqHash := c.consensusBatch.RequestHashes[idx]
 		c.missingRequestsFromBatch[reqID] = reqHash
-		missingRequestIds = append(missingRequestIds, reqID)
+		missingRequestIDs = append(missingRequestIDs, reqID)
 	}
-	c.log.Debugf("runVMIfNeeded: asking for missing requests, ids: %v", missingRequestIds)
-	msgData := messages.NewMissingRequestIDsMsg(missingRequestIds).Bytes()
-	c.committee.SendMsgToPeers(messages.MsgMissingRequestIDs, msgData, time.Now().UnixNano())
+	c.log.Debugf("runVMIfNeeded: asking for missing requests, ids: %v", missingRequestIDs)
+	c.committee.SendMsgToPeers(peering.PeerMessagePartyChain, &MissingRequestIDsMsg{
+		IDs: missingRequestIDs,
+	})
 }
 
 // sortBatch deterministically sorts batch based on the value extracted from the consensus entropy
@@ -255,12 +257,12 @@ func (c *Consensus) broadcastSignedResultIfNeeded() {
 	}
 	if time.Now().After(c.delaySendingSignedResult) {
 		signedResult := c.resultSignatures[c.committee.OwnPeerIndex()]
-		msg := &messages.SignedResultMsg{
+		msg := &signedResultMsg{
 			ChainInputID: c.stateOutput.ID(),
 			EssenceHash:  signedResult.EssenceHash,
 			SigShare:     signedResult.SigShare,
 		}
-		c.committee.SendMsgToPeers(messages.MsgSignedResult, util.MustBytes(msg), time.Now().UnixNano(), c.resultSigAck...)
+		c.committee.SendMsgToPeers(peering.PeerMessagePartyConsensus, msg, c.resultSigAck...)
 		c.delaySendingSignedResult = time.Now().Add(c.timers.BroadcastSignedResultRetry)
 
 		c.log.Debugf("broadcastSignedResult: broadcasted: essence hash: %s, chain input %s",
@@ -681,11 +683,13 @@ func (c *Consensus) processVMResult(result *vm.VMTask) {
 	sigShare, err := c.committee.DKShare().SignShare(essenceBytes)
 	c.assert.RequireNoError(err, "processVMResult: ")
 
-	c.resultSignatures[c.committee.OwnPeerIndex()] = &messages.SignedResultMsg{
-		SenderIndex:  c.committee.OwnPeerIndex(),
-		ChainInputID: result.ChainInput.ID(),
-		EssenceHash:  essenceHash,
-		SigShare:     sigShare,
+	c.resultSignatures[c.committee.OwnPeerIndex()] = &signedResultMsgIn{
+		signedResultMsg: signedResultMsg{
+			ChainInputID: result.ChainInput.ID(),
+			EssenceHash:  essenceHash,
+			SigShare:     sigShare,
+		},
+		SenderIndex: c.committee.OwnPeerIndex(),
 	}
 
 	c.workflow.vmResultSigned = true
@@ -708,7 +712,7 @@ func (c *Consensus) makeRotateStateControllerTransaction(task *vm.VMTask) *ledge
 	return essence
 }
 
-func (c *Consensus) receiveSignedResult(msg *messages.SignedResultMsg) {
+func (c *Consensus) receiveSignedResult(msg *signedResultMsgIn) {
 	if c.resultSignatures[msg.SenderIndex] != nil {
 		if c.resultSignatures[msg.SenderIndex].EssenceHash != msg.EssenceHash ||
 			!bytes.Equal(c.resultSignatures[msg.SenderIndex].SigShare[:], msg.SigShare[:]) {
@@ -739,26 +743,26 @@ func (c *Consensus) receiveSignedResult(msg *messages.SignedResultMsg) {
 		c.log.Debugf("receiveSignedResult: stored sig share from sender %d, essenceHash %v", msg.SenderIndex, msg.EssenceHash)
 	}
 	// send acknowledgement
-	msgAck := &messages.SignedResultAckMsg{
+	msgAck := &signedResultAckMsg{
 		ChainInputID: msg.ChainInputID,
 		EssenceHash:  msg.EssenceHash,
 	}
-	if err := c.committee.SendMsg(msg.SenderIndex, messages.MsgSignedResultAck, util.MustBytes(msgAck)); err != nil {
+	if err := c.committee.SendMsgByIndex(msg.SenderIndex, peering.PeerMessagePartyConsensus, msgAck); err != nil {
 		c.log.Errorf("receiveSignedResult: failed to send acknowledgement: %v", err)
 	}
 }
 
-func (c *Consensus) receiveSignedResultAck(msg *messages.SignedResultAckMsg) {
+func (c *Consensus) receiveSignedResultAck(chainInputID ledgerstate.OutputID, essenceHash hashing.HashValue, senderIndex uint16) {
 	own := c.resultSignatures[c.committee.OwnPeerIndex()]
-	if own == nil || msg.EssenceHash != own.EssenceHash || msg.ChainInputID != own.ChainInputID {
+	if own == nil || essenceHash != own.EssenceHash || chainInputID != own.ChainInputID {
 		return
 	}
 	for _, i := range c.resultSigAck {
-		if i == msg.SenderIndex {
+		if i == senderIndex {
 			return
 		}
 	}
-	c.resultSigAck = append(c.resultSigAck, msg.SenderIndex)
+	c.resultSigAck = append(c.resultSigAck, senderIndex)
 }
 
 // TODO mutex inside is not good

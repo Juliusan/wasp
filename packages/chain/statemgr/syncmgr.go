@@ -7,10 +7,9 @@ import (
 	"time"
 
 	"github.com/iotaledger/goshimmer/packages/ledgerstate"
-	"github.com/iotaledger/wasp/packages/chain/messages"
 	"github.com/iotaledger/wasp/packages/iscp"
+	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/state"
-	"github.com/iotaledger/wasp/packages/util"
 )
 
 func (sm *stateManager) outputPulled(output *ledgerstate.AliasOutput) bool {
@@ -86,10 +85,9 @@ func (sm *stateManager) doSyncActionIfNeeded() {
 		if nowis.After(requestBlockRetryTime) {
 			// have to pull
 			sm.log.Debugf("doSyncAction: requesting block index %v from %v random peers", i, numberOfNodesToRequestBlockFromConst)
-			data := util.MustBytes(&messages.GetBlockMsg{
+			sm.chain.SendMsgToRandomPeers(numberOfNodesToRequestBlockFromConst, peering.PeerMessagePartyStateManager, &getBlockMsg{
 				BlockIndex: i,
 			})
-			sm.peers.SendMsgToRandomPeersSimple(numberOfNodesToRequestBlockFromConst, messages.MsgGetBlock, data)
 			sm.syncingBlocks.startSyncingIfNeeded(i)
 			sm.syncingBlocks.setRequestBlockRetryTime(i, nowis.Add(sm.timers.GetBlockRetry))
 			if blockCandidatesCount == 0 {

@@ -8,64 +8,70 @@ import (
 	"github.com/iotaledger/wasp/packages/chain/messages"
 	"github.com/iotaledger/wasp/packages/hashing"
 	"github.com/iotaledger/wasp/packages/iscp"
+	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/state"
-	"github.com/iotaledger/wasp/packages/util"
 )
 
 // EventGetBlockMsg is a request for a block while syncing
-func (sm *stateManager) EventGetBlockMsg(msg *messages.GetBlockMsg) {
-	sm.eventGetBlockMsgCh <- msg
+func (sm *stateManager) EnqueueGetBlock(index uint32, senderNetID string) {
+	sm.eventGetBlockMsgCh <- &getBlockMsgIn{
+		getBlockMsg: getBlockMsg{BlockIndex: index},
+		SenderNetID: senderNetID,
+	}
 }
 
-func (sm *stateManager) eventGetBlockMsg(msg *messages.GetBlockMsg) {
-	sm.log.Debugw("EventGetBlockMsg received: ",
+func (sm *stateManager) handleGetBlock(msg *getBlockMsgIn) {
+	sm.log.Debugw("handleGetBlock: ",
 		"sender", msg.SenderNetID,
 		"block index", msg.BlockIndex,
 	)
 	if sm.stateOutput == nil { // Not a necessary check, only for optimization.
-		sm.log.Debugf("EventGetBlockMsg ignored: stateOutput is nil")
+		sm.log.Debugf("handleGetBlock message ignored: stateOutput is nil")
 		return
 	}
 	if msg.BlockIndex > sm.stateOutput.GetStateIndex() { // Not a necessary check, only for optimization.
-		sm.log.Debugf("EventGetBlockMsg ignored 1: block #%d not found. Current state index: #%d",
+		sm.log.Debugf("handleGetBlock message ignored 1: block #%d not found. Current state index: #%d",
 			msg.BlockIndex, sm.stateOutput.GetStateIndex())
 		return
 	}
 	blockBytes, err := state.LoadBlockBytes(sm.store, msg.BlockIndex)
 	if err != nil {
-		sm.log.Errorf("EventGetBlockMsg: LoadBlockBytes: %v", err)
+		sm.log.Errorf("handleGetBlock: LoadBlockBytes: %v", err)
 		return
 	}
 	if blockBytes == nil {
-		sm.log.Debugf("EventGetBlockMsg ignored 2: block #%d not found. Current state index: #%d",
+		sm.log.Debugf("handleGetBlock message ignored 2: block #%d not found. Current state index: #%d",
 			msg.BlockIndex, sm.stateOutput.GetStateIndex())
 		return
 	}
 
-	sm.log.Debugf("EventGetBlockMsg for state index #%d --> responding to peer %s", msg.BlockIndex, msg.SenderNetID)
+	sm.log.Debugf("handleGetBlock for state index #%d --> responding to peer %s", msg.BlockIndex, msg.SenderNetID)
 
-	sm.peers.SendSimple(msg.SenderNetID, messages.MsgBlock, util.MustBytes(&messages.BlockMsg{
+	sm.chain.SendMsgByNetID(msg.SenderNetID, peering.PeerMessagePartyStateManager, &blockMsg{
 		BlockBytes: blockBytes,
-	}))
+	})
 }
 
 // EventBlockMsg
-func (sm *stateManager) EventBlockMsg(msg *messages.BlockMsg) {
-	sm.eventBlockMsgCh <- msg
+func (sm *stateManager) EnqueueBlock(block []byte, senderNetID string) {
+	sm.eventBlockMsgCh <- &blockMsgIn{
+		blockMsg:    blockMsg{BlockBytes: block},
+		SenderNetID: senderNetID,
+	}
 }
 
-func (sm *stateManager) eventBlockMsg(msg *messages.BlockMsg) {
-	sm.log.Debugf("EventBlockMsg received from %v", msg.SenderNetID)
+func (sm *stateManager) handleBlock(msg *blockMsgIn) {
+	sm.log.Debugf("handleBlock message received from %v", msg.SenderNetID)
 	if sm.stateOutput == nil {
-		sm.log.Debugf("EventBlockMsg ignored: stateOutput is nil")
+		sm.log.Debugf("handleBlock message ignored: stateOutput is nil")
 		return
 	}
 	block, err := state.BlockFromBytes(msg.BlockBytes)
 	if err != nil {
-		sm.log.Warnf("EventBlockMsg ignored: wrong block received from peer %s. Err: %v", msg.SenderNetID, err)
+		sm.log.Warnf("handleBlock message ignored: wrong block received from peer %s. Err: %v", msg.SenderNetID, err)
 		return
 	}
-	sm.log.Debugw("EventBlockMsg from ",
+	sm.log.Debugw("handleBlock from ",
 		"sender", msg.SenderNetID,
 		"block index", block.BlockIndex(),
 		"approving output", iscp.OID(block.ApprovingOutputID()),

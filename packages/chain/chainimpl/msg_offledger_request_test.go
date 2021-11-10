@@ -1,7 +1,7 @@
 // Copyright 2020 IOTA Stiftung
 // SPDX-License-Identifier: Apache-2.0
 
-package messages
+package chainimpl
 
 import (
 	"bytes"
@@ -24,16 +24,18 @@ func TestMarshalling(t *testing.T) {
 		dict.Dict{foo: []byte("bar")},
 	)
 
-	msg := NewOffLedgerRequestPeerMsg(
-		iscp.RandomChainID(),
-		request.NewOffLedger(contract, entrypoint, args),
-	)
+	msg := &offLedgerRequestMsg{
+		ChainID: iscp.RandomChainID(),
+		Req:     request.NewOffLedger(contract, entrypoint, args),
+	}
 
 	// marshall the msg
-	msgBytes := msg.Bytes()
+	msgBytes, err := msg.Serialize()
+	require.NoError(t, err)
 
 	// unmashal the message from bytes and ensure everything checks out
-	unmarshalledMsg, err := OffLedgerRequestPeerMsgFromBytes(msgBytes)
+	unmarshalledMsg := &offLedgerRequestMsg{}
+	err = unmarshalledMsg.Deserialize(msgBytes)
 	require.NoError(t, err)
 
 	require.True(t, unmarshalledMsg.ChainID.AliasAddress.Equals(msg.ChainID.AliasAddress))

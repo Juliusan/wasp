@@ -726,7 +726,7 @@ func (s *procStep) run() {
 			if s.initResp != nil {
 				if isDkgInitProcRecvMsg(recv.Msg.MsgType) {
 					s.log.Debugf("[%v -%v-> %v] Resending initiator response.", s.proc.myNetID, s.initResp.MsgType, recv.From.NetID())
-					recv.From.SendMsg(s.initResp)
+					recv.From.SendMsg(s.initResp) //TODO
 					continue
 				}
 				if isDkgRabinEchoMsg(recv.Msg.MsgType) {
@@ -755,7 +755,7 @@ func (s *procStep) run() {
 					for i := range s.sentMsgs {
 						sendPeer := s.proc.netGroup.AllNodes()[i]
 						s.log.Debugf("[%v -%v-> %v] Sending peer message (first).", s.proc.myNetID, s.sentMsgs[i].MsgType, sendPeer.NetID())
-						sendPeer.SendMsg(s.sentMsgs[i])
+						sendPeer.SendMsg(s.sentMsgs[i]) //TODO
 					}
 					if s.haveAll() {
 						s.makeDone()
@@ -787,7 +787,7 @@ func (s *procStep) run() {
 				if s.recvMsgs[i] == nil {
 					sendPeer := s.proc.netGroup.AllNodes()[i]
 					s.log.Debugf("[%v -%v-> %v] Resending peer message (retry).", s.proc.myNetID, s.sentMsgs[i].MsgType, sendPeer.NetID())
-					sendPeer.SendMsg(s.sentMsgs[i])
+					sendPeer.SendMsg(s.sentMsgs[i]) //TODO
 				}
 			}
 			continue
@@ -806,7 +806,7 @@ func (s *procStep) sendEcho(recv *peering.RecvEvent) {
 			return
 		}
 		s.log.Debugf("[%v -%v-> %v] Resending peer message (echo).", s.proc.myNetID, echoMsg.MsgType, recv.From.NetID())
-		recv.From.SendMsg(&echoMsg)
+		recv.From.SendMsg(&echoMsg) //TODO
 		return
 	}
 	s.log.Warnf("[%v -%v-> %v] Unable to send echo message, is was not produced yet.", s.proc.myNetID, recv.Msg.MsgType, recv.From.NetID())
@@ -838,7 +838,7 @@ func (s *procStep) markDone(initResp *peering.PeerMessage) {
 	s.doneCh <- s.recvMsgs // Activate the next step.
 	s.initResp = initResp  // Store the response for later resends.
 	if s.initRecv != nil {
-		s.initRecv.From.SendMsg(initResp) // Send response to the initiator.
+		s.initRecv.From.SendMsg(initResp) // Send response to the initiator. TODO
 	} else {
 		s.log.Panicf("Step %v/%v closed with no initiator message.", s.proc.myNetID, s.step)
 	}

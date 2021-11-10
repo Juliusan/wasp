@@ -6,8 +6,8 @@ package group
 
 import (
 	"errors"
-	"fmt"
-	"time"
+	//	"fmt"
+	//	"time"
 
 	"github.com/iotaledger/hive.go/logger"
 	"github.com/iotaledger/wasp/packages/peering"
@@ -26,6 +26,8 @@ type groupImpl struct {
 	selfIndex   uint16
 	log         *logger.Logger
 }
+
+var _ peering.GroupProvider = &groupImpl{}
 
 // NewPeeringGroupProvider creates a generic peering group.
 // That should be used as a helper for peering implementations.
@@ -74,12 +76,12 @@ func (g *groupImpl) PeerIndexByNetID(peerNetID string) (uint16, error) {
 }
 
 // SendMsgByIndex implements peering.GroupProvider.
-func (g *groupImpl) SendMsgByIndex(peerIdx uint16, msg *peering.PeerMessage) {
-	g.nodes[peerIdx].SendMsg(msg)
+func (g *groupImpl) SendMsgByIndex(peerIdx uint16, peeringID peering.PeeringID, destinationParty peering.PeerMessagePartyType, msg peering.Serializable) {
+	g.nodes[peerIdx].SendMsg(peeringID, destinationParty, msg)
 }
 
 // Broadcast implements peering.GroupProvider.
-func (g *groupImpl) Broadcast(msg *peering.PeerMessage, includingSelf bool, except ...uint16) {
+func (g *groupImpl) Broadcast(peeringID peering.PeeringID, destinationParty peering.PeerMessagePartyType, msg peering.Serializable, includingSelf bool, except ...uint16) {
 	var peers map[uint16]peering.PeerSender
 	if includingSelf {
 		peers = g.AllNodes(except...)
@@ -87,13 +89,13 @@ func (g *groupImpl) Broadcast(msg *peering.PeerMessage, includingSelf bool, exce
 		peers = g.OtherNodes(except...)
 	}
 	for i := range peers {
-		peers[i].SendMsg(msg)
+		peers[i].SendMsg(peeringID, destinationParty, msg)
 	}
 }
 
 // ExchangeRound sends a message to the specified set of peers and waits for acks.
 // Resends the messages if acks are not received for some time.
-func (g *groupImpl) ExchangeRound(
+/* TODO func (g *groupImpl) ExchangeRound(
 	peers map[uint16]peering.PeerSender,
 	recvCh chan *peering.RecvEvent,
 	retryTimeout time.Duration,
@@ -178,7 +180,7 @@ func (g *groupImpl) ExchangeRound(
 		errMsg += fmt.Sprintf("[%v:%v]", i, errs[i].Error())
 	}
 	return errors.New(errMsg)
-}
+}*/
 
 // AllNodes returns a map of all nodes in the group.
 func (g *groupImpl) AllNodes(except ...uint16) map[uint16]peering.PeerSender {
@@ -213,26 +215,15 @@ func (g *groupImpl) OtherNodes(except ...uint16) map[uint16]peering.PeerSender {
 	return ret
 }
 
-// Attach starts listening for messages. Messages in this case will be filtered
-// to those received from nodes in the group only. SenderIndex will be filled
-// for the messages according to the message source.
-func (g *groupImpl) Attach(peeringID *peering.PeeringID, callback func(recv *peering.RecvEvent)) interface{} {
-	return g.netProvider.Attach(peeringID, func(recv *peering.RecvEvent) {
-		if idx, err := g.PeerIndexByNetID(recv.From.NetID()); err == nil && idx != NotInGroup {
-			recv.Msg.SenderIndex = idx
-			callback(recv)
-			return
-		}
-		g.log.Warnf("Dropping message MsgType=%v from %v, it does not belong to the group.", recv.Msg.MsgType, recv.From.NetID())
-	})
+func (g *groupImpl) RegisterPeerMessageParty(peeringID peering.PeeringID, party peering.PeerMessageGroupParty) error {
+	return g.netProvider.RegisterPeerMessageParty(peeringID, NewPeerMessageGroupSimpleParty(party, g))
 }
 
-// Detach terminates listening for messages.
-func (g *groupImpl) Detach(attachID interface{}) {
-	g.netProvider.Detach(attachID)
+func (g *groupImpl) UnregisterPeerMessageParty(peeringID peering.PeeringID, partyType peering.PeerMessagePartyType) error {
+	return g.netProvider.UnregisterPeerMessageParty(peeringID, partyType)
 }
 
-// Close implements peering.GroupProvider.
+//TODO Close implements peering.GroupProvider.
 func (g *groupImpl) Close() {
 	for i := range g.nodes {
 		g.nodes[i].Close()

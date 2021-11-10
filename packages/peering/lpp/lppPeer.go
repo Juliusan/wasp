@@ -35,6 +35,8 @@ type peer struct {
 	log          *logger.Logger
 }
 
+var _ peering.PeerSender = &peer{}
+
 func newPeer(remoteNetID string, remotePubKey *ed25519.PublicKey, remoteLppID libp2ppeer.ID, n *netImpl) *peer {
 	log := n.log.Named("peer:" + remoteNetID)
 	p := &peer{
@@ -107,8 +109,14 @@ func (p *peer) PubKey() *ed25519.PublicKey {
 // SendMsg implements peering.PeerSender interface for the remote peers.
 // The send operation is performed asynchronously.
 // The async sending helped to cope with sporadic deadlocks.
-func (p *peer) SendMsg(msg *peering.PeerMessage) {
+func (p *peer) SendMsg(peeringID peering.PeeringID, destinationParty peering.PeerMessagePartyType, msg peering.Serializable) {
 	//
+	peeringMsg, err := peering.NewPeerMessageOut(peeringID, destinationParty, msg)
+	if err != nil {
+		p.log.Errorf("error creating new peer out message: %v", err)
+		return
+	}
+
 	p.accessLock.RLock()
 	if !p.trusted {
 		p.log.Infof("Dropping outgoing message, because it was meant to send to a distrusted peer.")
@@ -116,10 +124,10 @@ func (p *peer) SendMsg(msg *peering.PeerMessage) {
 		return
 	}
 	p.accessLock.RUnlock()
-	p.sendCh.In() <- msg
+	p.sendCh.In() <- peeringMsg
 }
 
-func (p *peer) RecvMsg(msg *peering.PeerMessage) {
+func (p *peer) RecvMsg(msg *peering.PeerMessageIn) {
 	p.noteReceived()
 	msg.SenderNetID = p.NetID()
 	p.recvCh.In() <- msg
@@ -127,23 +135,20 @@ func (p *peer) RecvMsg(msg *peering.PeerMessage) {
 
 func (p *peer) sendLoop() {
 	for msg := range p.sendCh.Out() {
-		p.sendMsgDirect(msg.(*peering.PeerMessage))
+		p.sendMsgDirect(msg.(*peering.PeerMessageOut))
 	}
 }
 
 func (p *peer) recvLoop() {
 	for msg := range p.recvCh.Out() {
-		peerMsg, ok := msg.(*peering.PeerMessage)
+		peerMsg, ok := msg.(*peering.PeerMessageIn)
 		if ok {
-			p.net.triggerRecvEvents(&peering.RecvEvent{
-				From: p,
-				Msg:  peerMsg,
-			})
+			p.net.handleReceivedMessage(peerMsg)
 		}
 	}
 }
 
-func (p *peer) sendMsgDirect(msg *peering.PeerMessage) {
+func (p *peer) sendMsgDirect(msg *peering.PeerMessageOut) {
 	stream, err := p.net.lppHost.NewStream(p.net.ctx, p.remoteLppID, lppProtocolPeering)
 	if err != nil {
 		p.log.Warnf("Failed to send outgoing message, unable to allocate stream, reason=%v", err)

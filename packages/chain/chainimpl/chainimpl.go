@@ -16,7 +16,6 @@ import (
 	"github.com/iotaledger/wasp/packages/chain/committee"
 	"github.com/iotaledger/wasp/packages/chain/consensus"
 	"github.com/iotaledger/wasp/packages/chain/mempool"
-	"github.com/iotaledger/wasp/packages/chain/messages"
 	"github.com/iotaledger/wasp/packages/chain/nodeconnimpl"
 	"github.com/iotaledger/wasp/packages/chain/statemgr"
 	"github.com/iotaledger/wasp/packages/iscp"
@@ -37,11 +36,23 @@ import (
 )
 
 var (
-	_ chain.Chain         = &chainObj{}
-	_ chain.ChainCore     = &chainObj{}
-	_ chain.ChainEntry    = &chainObj{}
-	_ chain.ChainRequests = &chainObj{}
-	_ chain.ChainEvents   = &chainObj{}
+	_ chain.Chain                    = &chainObj{}
+	_ chain.ChainCore                = &chainObj{}
+	_ chain.ChainEntry               = &chainObj{}
+	_ chain.ChainRequests            = &chainObj{}
+	_ chain.ChainEvents              = &chainObj{}
+	_ peering.PeerMessageSimpleParty = &chainObj{}
+	_ peering.PeerMessageGroupParty  = &chainObj{}
+)
+
+type chainMessageType byte
+
+const (
+	chainMessageTypeStart chainMessageType = iota
+	chainMessageTypeMissingRequest
+	chainMessageTypeOffledgerRequest
+	chainMessageTypeRequestAck
+	chainMessageTypeEnd
 )
 
 type chainObj struct {
@@ -154,39 +165,38 @@ func NewChain(
 	}
 	ret.stateMgr = statemgr.New(db, ret, peers, ret.nodeConn)
 	ret.peers = &peers
-	ret.AttachToPeerMessages(ret.receiveChainPeerMessages)
+	ret.RegisterPeerMessageParty(ret)
 	go ret.handleMessagesLoop()
 	ret.startTimer()
 	return ret
 }
 
-func (c *chainObj) receiveCommitteePeerMessages(event *peering.RecvEvent) {
-	if event.Msg.MsgType == messages.MsgMissingRequestIDs {
-		c.enqueueMissingRequestIDsPeerMsg(event.Msg)
+func (c *chainObj) GetPartyType() peering.PeerMessagePartyType {
+	return peering.PeerMessagePartyChain
+}
+
+func (c *chainObj) HandleMessage(senderNetID string, msg peering.Serializable) {
+	switch msgt := msg.(type) {
+	case *offLedgerRequestMsg:
+		c.EnqueueOffLedgerRequestPeerMsg(msgt.Req, senderNetID)
+	case *requestAckMsg:
+		c.enqueueRequestAckPeerMsg(msgt.ReqID, senderNetID)
+	case *missingRequestMsg:
+		c.enqueueMissingRequestPeerMsg(msgt.Request)
 	}
 }
 
-func (c *chainObj) receiveChainPeerMessages(event *peering.RecvEvent) {
-	peerMsg := event.Msg
-	switch event.Msg.MsgType {
-	case messages.MsgOffLedgerRequest:
-		msg, err := messages.OffLedgerRequestPeerMsgFromBytes(peerMsg.MsgData)
-		if err != nil {
-			c.log.Error(err)
-			return
-		}
-		c.EnqueueOffLedgerRequestPeerMsg(msg.Req, peerMsg.SenderNetID)
-	case messages.MsgRequestAck:
-		msg, err := messages.RequestAckPeerMsgFromBytes(peerMsg.MsgData)
-		if err != nil {
-			c.log.Error(err)
-			return
-		}
-		c.enqueueRequestAckPeerMsg(msg.ReqID, peerMsg.SenderNetID)
-	case messages.MsgMissingRequest:
-		//c.enqueueMissingRequestPeerMsg(msg)
-	default:
-	}
+func (c *chainObj) HandleGroupMessage(senderNetID string, senderIndex uint16, msg peering.Serializable) {
+	msgt := msg.(*consensus.MissingRequestIDsMsg)
+	c.enqueueMissingRequestIDsPeerMsg(msgt.IDs, senderNetID)
+}
+
+func (c *chainObj) SendMsgByNetID(netID string, destinationParty peering.PeerMessagePartyType, msg peering.Serializable) {
+	(*c.peers).SendMsgByNetID(netID, c.peeringID, destinationParty, msg)
+}
+
+func (c *chainObj) SendMsgToRandomPeers(upToNumPeers uint16, destinationParty peering.PeerMessagePartyType, msg peering.Serializable) {
+	(*c.peers).SendMsgToRandomPeers(upToNumPeers, c.peeringID, destinationParty, msg)
 }
 
 // processChainTransition processes the unique chain output which exists on the chain's address
@@ -337,7 +347,7 @@ func (c *chainObj) createNewCommitteeAndConsensus(cmtRec *registry.CommitteeReco
 		return xerrors.Errorf("createNewCommitteeAndConsensus: failed to create committee object for state address %s: %w",
 			cmtRec.Address.Base58(), err)
 	}
-	cmt.AttachToPeerMessages(c.receiveCommitteePeerMessages)
+	cmt.RegisterPeerMessageParty(c)
 	c.log.Debugf("creating new consensus object...")
 	c.consensus = consensus.New(c, c.mempool, cmt, c.nodeConn, c.pullMissingRequestsFromCommittee, c.chainMetrics)
 	c.setCommittee(cmt)

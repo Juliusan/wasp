@@ -11,17 +11,12 @@
 package peering
 
 import (
-	"bytes"
-	"io"
-	"math/rand"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/iotaledger/goshimmer/packages/ledgerstate"
 	"github.com/iotaledger/hive.go/crypto/ed25519"
-	"github.com/iotaledger/wasp/packages/util"
-	"github.com/mr-tron/base58"
 	"golang.org/x/xerrors"
 )
 
@@ -41,30 +36,6 @@ const (
 // the consensus, etc.
 type PeeringID [ledgerstate.AddressLength]byte
 
-func RandomPeeringID(seed ...[]byte) PeeringID {
-	var pid PeeringID
-	_, _ = rand.Read(pid[:])
-	return pid
-}
-
-func (pid *PeeringID) String() string {
-	return base58.Encode(pid[:])
-}
-
-func (pid *PeeringID) Read(r io.Reader) error {
-	if n, err := r.Read(pid[:]); err != nil || n != ledgerstate.AddressLength {
-		return xerrors.Errorf("error while parsing PeeringID (err=%v)", err)
-	}
-	return nil
-}
-
-func (pid *PeeringID) Write(w io.Writer) error {
-	if n, err := w.Write(pid[:]); err != nil || n != ledgerstate.AddressLength {
-		return xerrors.Errorf("error while serializing PeeringID (err=%v)", err)
-	}
-	return nil
-}
-
 // NetworkProvider stands for the peer-to-peer network, as seen
 // from the viewpoint of a single participant.
 type NetworkProvider interface {
@@ -72,11 +43,10 @@ type NetworkProvider interface {
 	Self() PeerSender
 	PeerGroup(peerAddrs []string) (GroupProvider, error)
 	PeerDomain(peerAddrs []string) (PeerDomainProvider, error)
-	Attach(peeringID *PeeringID, callback func(recv *RecvEvent)) interface{}
-	Detach(attachID interface{})
 	PeerByNetID(peerNetID string) (PeerSender, error)
 	PeerByPubKey(peerPub *ed25519.PublicKey) (PeerSender, error)
 	PeerStatus() []PeerStatusProvider
+	PeerMessagePartyCollection
 }
 
 // TrustedNetworkManager is used maintain a configuration which peers are trusted.
@@ -96,43 +66,19 @@ type TrustedPeer struct {
 	NetID  string
 }
 
-func TrustedPeerFromBytes(buf []byte) (*TrustedPeer, error) {
-	var err error
-	r := bytes.NewBuffer(buf)
-	tp := TrustedPeer{}
-	var keyBytes []byte
-	if keyBytes, err = util.ReadBytes16(r); err != nil {
-		return nil, err
-	}
-	tp.PubKey, _, err = ed25519.PublicKeyFromBytes(keyBytes)
-	if err != nil {
-		return nil, err
-	}
-	if tp.NetID, err = util.ReadString16(r); err != nil {
-		return nil, err
-	}
-	return &tp, nil
+/*type PeerCollection interface {
+	RegisterPeerMessageParty(peeringID PeeringID, party PeerMessageParty) error
+	UnregisterPeerMessageParty(peeringID PeeringID, partyType PeerMessagePartyType) error
+}*/
+
+type PeerMessagePartyCollection interface {
+	RegisterPeerMessageParty(peeringID PeeringID, party PeerMessageSimpleParty) error
+	UnregisterPeerMessageParty(peeringID PeeringID, partyType PeerMessagePartyType) error
 }
 
-func (tp *TrustedPeer) Bytes() ([]byte, error) {
-	var buf bytes.Buffer
-	if err := util.WriteBytes16(&buf, tp.PubKey.Bytes()); err != nil {
-		return nil, err
-	}
-	if err := util.WriteString16(&buf, tp.NetID); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func (tp *TrustedPeer) PubKeyBytes() ([]byte, error) {
-	return tp.PubKey.Bytes(), nil
-}
-
-type PeerCollection interface {
-	Attach(peeringID *PeeringID, callback func(recv *RecvEvent)) interface{}
-	Detach(attachID interface{})
-	Close()
+type PeerMessagePartyGroup interface {
+	RegisterPeerMessageParty(peeringID PeeringID, party PeerMessageGroupParty) error
+	UnregisterPeerMessageParty(peeringID PeeringID, partyType PeerMessagePartyType) error
 }
 
 // GroupProvider stands for a subset of a peer-to-peer network
@@ -145,31 +91,31 @@ type GroupProvider interface {
 	SelfIndex() uint16
 	PeerIndex(peer PeerSender) (uint16, error)
 	PeerIndexByNetID(peerNetID string) (uint16, error)
-	SendMsgByIndex(peerIdx uint16, msg *PeerMessage)
-	Broadcast(msg *PeerMessage, includingSelf bool, except ...uint16)
-	ExchangeRound(
+	SendMsgByIndex(peerIdx uint16, peeringID PeeringID, destinationParty PeerMessagePartyType, msg Serializable)
+	Broadcast(peeringID PeeringID, destinationParty PeerMessagePartyType, msg Serializable, includingSelf bool, except ...uint16)
+	/* TODO	ExchangeRound(
 		peers map[uint16]PeerSender,
 		recvCh chan *RecvEvent,
 		retryTimeout time.Duration,
 		giveUpTimeout time.Duration,
 		sendCB func(peerIdx uint16, peer PeerSender),
 		recvCB func(recv *RecvEvent) (bool, error),
-	) error
+	) error */
 	AllNodes(except ...uint16) map[uint16]PeerSender   // Returns all the nodes in the group except specified.
 	OtherNodes(except ...uint16) map[uint16]PeerSender // Returns other nodes in the group (excluding Self and specified).
-	PeerCollection
+	Close()
+	PeerMessagePartyGroup
 }
 
 // PeerDomainProvider implements unordered set of peers which can dynamically change
 // All peers in the domain shares same peeringID. Each peer within domain is identified via its netID
 type PeerDomainProvider interface {
-	SendMsgByNetID(netID string, msg *PeerMessage)
-	SendMsgToRandomPeers(upToNumPeers uint16, msg *PeerMessage)
-	SendSimple(netID string, msgType byte, msgData []byte)
-	SendMsgToRandomPeersSimple(upToNumPeers uint16, msgType byte, msgData []byte)
+	SendMsgByNetID(netID string, peeringID PeeringID, destinationParty PeerMessagePartyType, msg Serializable)
+	SendMsgToRandomPeers(upToNumPeers uint16, peeringID PeeringID, destinationParty PeerMessagePartyType, msg Serializable)
 	ReshufflePeers(seedBytes ...[]byte)
 	GetRandomPeers(upToNumPeers int) []string
-	PeerCollection
+	Close()
+	PeerMessagePartyCollection
 }
 
 // PeerSender represents an interface to some remote peer.
@@ -186,7 +132,7 @@ type PeerSender interface {
 
 	// SendMsg works in an asynchronous way, and therefore the
 	// errors are not returned here.
-	SendMsg(msg *PeerMessage)
+	SendMsg(peeringID PeeringID, destinationParty PeerMessagePartyType, msg Serializable)
 
 	// IsAlive indicates, if there is a working connection with the peer.
 	// It is always an approximate state.
@@ -215,103 +161,74 @@ type PeerStatusProvider interface {
 
 // RecvEvent stands for a received message along with
 // the reference to its sender peer.
-type RecvEvent struct {
+/*type RecvEvent struct {
 	From PeerSender
 	Msg  *PeerMessage
-}
+}*/
 
 // PeerMessage is an envelope for all the messages exchanged via
 // the peering module.
-type PeerMessage struct {
-	PeeringID   PeeringID
+type PeerMessageData struct {
+	PeeringID        PeeringID
+	Timestamp        int64
+	DestinationParty PeerMessagePartyType
+	MsgDeserializer  PeerMessagePartyType
+	MsgType          byte
+	MsgData          []byte
+}
+
+type PeerMessageOut struct {
+	PeerMessageData
+	serialized *[]byte
+}
+
+type PeerMessageIn struct {
+	PeerMessageData
 	SenderIndex uint16 // TODO: Only meaningful in a group, and when calculated by the client.
 	SenderNetID string // TODO: Non persistent. Only used by PeeringDomain, filled by the receiver
-	Timestamp   int64
-	MsgType     byte
-	MsgData     []byte
-	serialized  *[]byte
 }
 
-//nolint:gocritic
-func NewPeerMessageFromBytes(buf []byte) (*PeerMessage, error) {
-	var err error
-	r := bytes.NewBuffer(buf)
-	m := PeerMessage{}
-	if err = util.ReadInt64(r, &m.Timestamp); err != nil {
-		return nil, err
+type PeerMessagePartyType byte
+
+const (
+	peerMessagePartyStart PeerMessagePartyType = iota
+	PeerMessagePartyAcs
+	PeerMessagePartyChain
+	PeerMessagePartyCommittee
+	PeerMessagePartyConsensus
+	PeerMessagePartyDkg
+	PeerMessagePartyStateManager
+	peerMessagePartyEnd
+)
+
+func NewPeerMessagePartyType(b byte) (PeerMessagePartyType, error) {
+	if (byte(peerMessagePartyStart) < b) && (b < byte(peerMessagePartyEnd)) {
+		return PeerMessagePartyType(b), nil
 	}
-	if m.MsgType, err = util.ReadByte(r); err != nil {
-		return nil, err
-	}
-	switch m.MsgType {
-	case MsgTypeReserved:
-	case MsgTypeHandshake:
-		if m.MsgData, err = util.ReadBytes32(r); err != nil {
-			return nil, err
-		}
-	case MsgTypeMsgChunk:
-		if m.MsgData, err = util.ReadBytes32(r); err != nil {
-			return nil, err
-		}
-	default:
-		if err = m.PeeringID.Read(r); err != nil {
-			return nil, err
-		}
-		if err = util.ReadUint16(r, &m.SenderIndex); err != nil {
-			return nil, err
-		}
-		if m.MsgData, err = util.ReadBytes32(r); err != nil {
-			return nil, err
-		}
-	}
-	return &m, nil
+	return peerMessagePartyStart, xerrors.Errorf("byte %v is not of PeerMessagePartyType", b)
 }
 
-func (m *PeerMessage) Bytes() ([]byte, error) {
-	if m.serialized == nil {
-		serialized, err := m.bytes()
-		if err != nil {
-		return nil, err
-	}
-		m.serialized = &serialized
-	}
-	return *(m.serialized), nil
+type Serializable interface {
+	GetMsgType() byte // Must be unique to each deserialiser PeerMessageParty
+	GetDeserializer() PeerMessagePartyType
+	Serialize() ([]byte, error)
+	Deserialize([]byte) error
 }
 
-func (m *PeerMessage) bytes() ([]byte, error) {
-	var buf bytes.Buffer
-	if err := util.WriteInt64(&buf, m.Timestamp); err != nil {
-		return nil, err
-	}
-	if err := util.WriteByte(&buf, m.MsgType); err != nil {
-		return nil, err
-	}
-	switch m.MsgType {
-	case MsgTypeReserved:
-	case MsgTypeHandshake:
-		if err := util.WriteBytes32(&buf, m.MsgData); err != nil {
-			return nil, err
-		}
-	case MsgTypeMsgChunk:
-		if err := util.WriteBytes32(&buf, m.MsgData); err != nil {
-			return nil, err
-		}
-	default:
-		if err := m.PeeringID.Write(&buf); err != nil {
-			return nil, err
-		}
-		if err := util.WriteUint16(&buf, m.SenderIndex); err != nil {
-			return nil, err
-		}
-		if err := util.WriteBytes32(&buf, m.MsgData); err != nil {
-			return nil, err
-		}
-	}
-	return buf.Bytes(), nil
+type PeerMessageParty interface {
+	// Each PeerMessageParty should statically implement a following method:
+	// GetEmptyMessage(msgType byte) (Serializable, error)
+	GetPartyType() PeerMessagePartyType
 }
 
-func (m *PeerMessage) IsUserMessage() bool {
-	return m.MsgType >= FirstUserMsgCode
+type PeerMessageSimpleParty interface {
+	PeerMessageParty
+	HandleMessage(senderNetID string, msg Serializable)
+}
+
+type PeerMessageGroupParty interface {
+	PeerMessageParty
+	HandleGroupMessage(senderNetID string, SenderIndex uint16, msg Serializable)
 }
 
 // ParseNetID parses the NetID and returns the corresponding host and port.

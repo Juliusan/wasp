@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/iotaledger/hive.go/logger"
+	"github.com/iotaledger/wasp/packages/chain"
 	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/tcrypto"
 	"golang.org/x/xerrors"
@@ -47,28 +48,48 @@ type CommonSubsetCoordinator struct {
 	currentStateIndex uint32                   // Last state index passed by this node.
 	lock              sync.RWMutex
 
-	peeringID peering.PeeringID
+	committee chain.Committee
 	netGroup  peering.GroupProvider
 	dkShare   *tcrypto.DKShare
 	log       *logger.Logger
 }
 
+var _ chain.AsynchronousCommonSubsetRunner = &CommonSubsetCoordinator{}
+var _ peering.PeerMessageGroupParty = &CommonSubsetCoordinator{}
+
 func NewCommonSubsetCoordinator(
-	peeringID peering.PeeringID,
+	committee chain.Committee,
 	net peering.NetworkProvider,
 	netGroup peering.GroupProvider,
 	dkShare *tcrypto.DKShare,
 	log *logger.Logger,
 ) *CommonSubsetCoordinator {
-	return &CommonSubsetCoordinator{
+	ret := &CommonSubsetCoordinator{
 		csInsts:   make(map[uint64]*CommonSubset),
 		csAsked:   make(map[uint64]bool),
 		lock:      sync.RWMutex{},
-		peeringID: peeringID,
+		committee: committee,
 		netGroup:  netGroup,
 		dkShare:   dkShare,
 		log:       log,
 	}
+	committee.RegisterPeerMessageParty(ret)
+	return ret
+}
+
+func (csc *CommonSubsetCoordinator) GetPartyType() peering.PeerMessagePartyType {
+	return peering.PeerMessagePartyAcs
+}
+
+func (csc *CommonSubsetCoordinator) HandleGroupMessage(senderNetID string, senderIndex uint16, msg peering.Serializable) {
+	mb := msg.(*msgBatch)
+	var err error
+	var cs *CommonSubset
+	if cs, err = csc.getOrCreateCS(mb.sessionID, mb.stateIndex, nil); err != nil {
+		csc.log.Debugf("Unable to get a CommonSubset instance for sessionID=%v, reason=%v", mb.sessionID, err)
+		return
+	}
+	cs.HandleMsgBatch(mb)
 }
 
 // Close implements the AsynchronousCommonSubsetRunner interface.
@@ -100,28 +121,6 @@ func (csc *CommonSubsetCoordinator) RunACSConsensus(
 		return
 	}
 	cs.Input(value)
-}
-
-// TryHandleMessage implements the AsynchronousCommonSubsetRunner interface.
-// It handles the network messages, if they are of correct type.
-func (csc *CommonSubsetCoordinator) TryHandleMessage(recv *peering.RecvEvent) bool {
-	if recv.Msg.MsgType != acsMsgType {
-		return false
-	}
-	mb := msgBatch{}
-	if err := mb.FromBytes(recv.Msg.MsgData); err != nil {
-		csc.log.Errorf("Cannot decode message: %v", err)
-		return true
-	}
-	csc.log.Debugf("ACS::IO - Received a msgBatch=%+v", mb)
-	var err error
-	var cs *CommonSubset
-	if cs, err = csc.getOrCreateCS(mb.sessionID, mb.stateIndex, nil); err != nil {
-		csc.log.Debugf("Unable to get a CommonSubset instance for sessionID=%v, reason=%v", mb.sessionID, err)
-		return true
-	}
-	cs.HandleMsgBatch(&mb)
-	return true
 }
 
 func (csc *CommonSubsetCoordinator) getOrCreateCS(
@@ -167,7 +166,7 @@ func (csc *CommonSubsetCoordinator) getOrCreateCS(
 		var err error
 		var newCS *CommonSubset
 		outCh := make(chan map[uint16][]byte, 1)
-		if newCS, err = NewCommonSubset(sessionID, stateIndex, csc.peeringID, csc.netGroup, csc.dkShare, false, outCh, csc.log); err != nil {
+		if newCS, err = NewCommonSubset(sessionID, stateIndex, csc.committee, csc.netGroup, csc.dkShare, false, outCh, csc.log); err != nil {
 			return nil, err
 		}
 		csc.csInsts[sessionID] = newCS

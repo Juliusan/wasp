@@ -29,9 +29,9 @@ import (
 	"time"
 
 	"github.com/iotaledger/hive.go/crypto/ed25519"
-	"github.com/iotaledger/hive.go/events"
 	"github.com/iotaledger/hive.go/logger"
 	"github.com/iotaledger/wasp/packages/peering"
+	"github.com/iotaledger/wasp/packages/peering/deserializer"
 	"github.com/iotaledger/wasp/packages/peering/domain"
 	"github.com/iotaledger/wasp/packages/peering/group"
 	"github.com/iotaledger/wasp/packages/util"
@@ -57,18 +57,20 @@ const (
 
 // netImpl implements a peering.NetworkProvider interface.
 type netImpl struct {
-	myNetID     string                  // NetID of this node.
-	lppHost     host.Host               // The instance of the libp2p to use.
-	port        int                     // Port to use for peering.
-	ctx         context.Context         // Context for the libp2p
-	ctxCancel   context.CancelFunc      // A way to close the context.
-	peers       map[libp2ppeer.ID]*peer // By remotePeer.ID()
-	peersLock   *sync.RWMutex
-	recvEvents  *events.Event // Used to publish events to all attached clients.
-	nodeKeyPair *ed25519.KeyPair
-	trusted     peering.TrustedNetworkManager
-	log         *logger.Logger
+	myNetID          string                  // NetID of this node.
+	lppHost          host.Host               // The instance of the libp2p to use.
+	port             int                     // Port to use for peering.
+	ctx              context.Context         // Context for the libp2p
+	ctxCancel        context.CancelFunc      // A way to close the context.
+	peers            map[libp2ppeer.ID]*peer // By remotePeer.ID()
+	peersLock        *sync.RWMutex
+	destinationPeers map[peering.PeerMessagePartyType](map[peering.PeeringID](peering.PeerMessageParty))
+	nodeKeyPair      *ed25519.KeyPair
+	trusted          peering.TrustedNetworkManager
+	log              *logger.Logger
 }
+
+var _ peering.NetworkProvider = &netImpl{}
 
 // NewNetworkProvider is a constructor for the TCP based
 // peering network implementation.
@@ -101,19 +103,18 @@ func NewNetworkProvider(
 		return nil, nil, xerrors.Errorf("failed to construct libp2p host: %w", err)
 	}
 	n := netImpl{
-		myNetID:     myNetID,
-		lppHost:     lppHost,
-		ctx:         ctx,
-		ctxCancel:   ctxCancel,
-		port:        port,
-		peers:       make(map[libp2ppeer.ID]*peer),
-		peersLock:   &sync.RWMutex{},
-		recvEvents:  nil, // Initialized bellow.
-		nodeKeyPair: nodeKeyPair,
-		trusted:     trusted,
-		log:         log,
+		myNetID:          myNetID,
+		lppHost:          lppHost,
+		ctx:              ctx,
+		ctxCancel:        ctxCancel,
+		port:             port,
+		peers:            make(map[libp2ppeer.ID]*peer),
+		peersLock:        &sync.RWMutex{},
+		destinationPeers: make(map[peering.PeerMessagePartyType](map[peering.PeeringID](peering.PeerMessageParty))),
+		nodeKeyPair:      nodeKeyPair,
+		trusted:          trusted,
+		log:              log,
 	}
-	n.recvEvents = events.NewEvent(n.eventHandler)
 	//
 	// Finish initialization of the libp2p node.
 	lppHost.SetStreamHandler(lppProtocolPeering, n.lppPeeringProtocolHandler)
@@ -208,7 +209,7 @@ func (n *netImpl) lppPeeringProtocolHandler(stream network.Stream) {
 		n.log.Warnf("Failed to read incoming payload from %v, reason=%v", remotePeer.remoteNetID, err)
 		return
 	}
-	peerMsg, err := peering.NewPeerMessageFromBytes(payload) // Do not use the signatures, we have TLS.
+	peerMsg, err := peering.NewPeerMessageIn(payload) // Do not use the signatures, we have TLS.
 	if err != nil {
 		n.log.Warnf("Error while decoding a message, reason=%v", err)
 		return
@@ -287,13 +288,6 @@ func (n *netImpl) delPeer(peer *peer) {
 	delete(n.peers, peer.remoteLppID)
 }
 
-// A handler suitable for events.NewEvent().
-func (n *netImpl) eventHandler(handler interface{}, params ...interface{}) {
-	callback := handler.(func(_ *peering.RecvEvent))
-	recvEvent := params[0].(*peering.RecvEvent)
-	callback(recvEvent)
-}
-
 // Run starts listening and communicating with the network.
 func (n *netImpl) Run(shutdownSignal <-chan struct{}) {
 	queueRecvStopCh := make(chan bool)
@@ -341,25 +335,36 @@ func (n *netImpl) PeerDomain(peerNetIDs []string) (peering.PeerDomainProvider, e
 	return domain.NewPeerDomain(n, peers, n.log), nil
 }
 
-// Attach implements peering.NetworkProvider.
-func (n *netImpl) Attach(peeringID *peering.PeeringID, callback func(recv *peering.RecvEvent)) interface{} {
-	closure := events.NewClosure(func(recv *peering.RecvEvent) {
-		if peeringID == nil || *peeringID == recv.Msg.PeeringID {
-			callback(recv)
+func (n *netImpl) RegisterPeerMessageParty(peeringID peering.PeeringID, party peering.PeerMessageParty) error {
+	partyType := party.GetPartyType()
+	partyTypeDestinationPeers, ok := n.destinationPeers[partyType]
+	if ok {
+		_, ok = partyTypeDestinationPeers[peeringID]
+		if ok {
+			return xerrors.Errorf("destination party of type %v for peering id %v is already registered", partyType, peeringID)
 		}
-	})
-	n.recvEvents.Attach(closure)
-	return closure
+	} else {
+		partyTypeDestinationPeers = make(map[peering.PeeringID](peering.PeerMessageParty))
+		n.destinationPeers[partyType] = partyTypeDestinationPeers
+	}
+	partyTypeDestinationPeers[peeringID] = party
+	return nil
 }
 
-// Detach implements peering.NetworkProvider.
-func (n *netImpl) Detach(attachID interface{}) {
-	switch closure := attachID.(type) {
-	case *events.Closure:
-		n.recvEvents.Detach(closure)
-	default:
-		panic("invalid_attach_id")
+func (n *netImpl) UnregisterPeerMessageParty(peeringID peering.PeeringID, partyType peering.PeerMessagePartyType) error {
+	partyTypeDestinationPeers, ok := n.destinationPeers[partyType]
+	if !ok {
+		return xerrors.Errorf("unknown destination party of type %v", partyType)
 	}
+	_, ok = partyTypeDestinationPeers[peeringID]
+	if !ok {
+		return xerrors.Errorf("unknown destination party of type %v for peering ID %v", partyType, peeringID)
+	}
+	delete(partyTypeDestinationPeers, peeringID)
+	if len(partyTypeDestinationPeers) == 0 {
+		delete(n.destinationPeers, partyType)
+	}
+	return nil
 }
 
 // PeerByNetID implements peering.NetworkProvider.
@@ -403,16 +408,41 @@ func (n *netImpl) PubKey() *ed25519.PublicKey {
 }
 
 // SendMsg implements peering.PeerSender for the Self() node.
-func (n *netImpl) SendMsg(msg *peering.PeerMessage) {
+func (n *netImpl) SendMsg(peeringID peering.PeeringID, destinationParty peering.PeerMessagePartyType, msg peering.Serializable) {
+	peeringMsg, err := peering.NewPeerMessageOut(peeringID, destinationParty, msg)
+	if err != nil {
+		n.log.Errorf("error creating new peer out message: %v", err)
+		return
+	}
 	// Don't go via the network, if sending a message to self.
-	n.triggerRecvEvents(&peering.RecvEvent{
-		From: n.Self(),
-		Msg:  msg,
+	n.handleReceivedMessage(&peering.PeerMessageIn{
+		PeerMessageData: peeringMsg.PeerMessageData,
+		SenderNetID:     n.Self().NetID(),
 	})
 }
 
-func (n *netImpl) triggerRecvEvents(msg *peering.RecvEvent) {
-	n.recvEvents.Trigger(msg)
+func (n *netImpl) handleReceivedMessage(peerMsg *peering.PeerMessageIn) {
+	partyTypeDestinationPeers, ok := n.destinationPeers[peerMsg.DestinationParty]
+	if !ok {
+		n.log.Errorf("unknown destination party of type %v", peerMsg.DestinationParty)
+		return
+	}
+	destinationPeer, ok := partyTypeDestinationPeers[peerMsg.PeeringID]
+	if !ok {
+		n.log.Errorf("unknown destination party of type %v for peering ID %v", peerMsg.DestinationParty, peerMsg.PeeringID)
+		return
+	}
+	msg, err := deserializer.GetEmptyMessage(peerMsg.MsgDeserializer, peerMsg.MsgType)
+	if err != nil {
+		n.log.Errorf("unable to get empty message of type %v from party %v for deseriazation: %v", peerMsg.MsgType, peerMsg.MsgDeserializer, err)
+		return
+	}
+	err = msg.Deserialize(peerMsg.MsgData)
+	if err != nil {
+		n.log.Errorf("unable to deserialize message of type %v from party %v (%T): %v", peerMsg.MsgType, peerMsg.MsgDeserializer, msg, err)
+		return
+	}
+	destinationPeer.HandleMessage(peerMsg.SenderNetID, msg)
 }
 
 // IsAlive implements peering.PeerSender for the Self() node.

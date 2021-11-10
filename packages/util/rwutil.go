@@ -352,6 +352,30 @@ func ReadHashValue(r io.Reader, h *hashing.HashValue) error {
 	return nil
 }
 
+func WriteHashValue(w io.Writer, h hashing.HashValue) error {
+	_, err := w.Write(h[:])
+	return err
+}
+
+//////////////////// outputID \\\\\\\\\\\\\\\\\\\\
+
+func ReadOutputID(r io.Reader, oid *ledgerstate.OutputID) error {
+	n, err := r.Read(oid[:])
+	if err != nil {
+		return err
+	}
+	if n != ledgerstate.OutputIDLength {
+		return fmt.Errorf("error while reading output ID: read %v bytes, expected %v bytes",
+			n, ledgerstate.OutputIDLength)
+	}
+	return nil
+}
+
+func WriteOutputID(w io.Writer, oid ledgerstate.OutputID) error {
+	_, err := w.Write(oid[:])
+	return err
+}
+
 //////////////////// marshaled \\\\\\\\\\\\\\\\\\\\
 
 // ReadMarshaled supports kyber.Point, kyber.Scalar and similar.
@@ -372,16 +396,4 @@ func WriteMarshaled(w io.Writer, val encoding.BinaryMarshaler) error {
 		return err
 	}
 	return WriteBytes16(w, bin)
-}
-
-func ReadOutputID(r io.Reader, oid *ledgerstate.OutputID) error {
-	n, err := r.Read(oid[:])
-	if err != nil {
-		return err
-	}
-	if n != ledgerstate.OutputIDLength {
-		return fmt.Errorf("error while reading output ID: read %v bytes, expected %v bytes",
-			n, ledgerstate.OutputIDLength)
-	}
-	return nil
 }

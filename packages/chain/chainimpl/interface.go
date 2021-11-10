@@ -10,7 +10,6 @@ import (
 	"github.com/iotaledger/hive.go/events"
 	"github.com/iotaledger/hive.go/logger"
 	"github.com/iotaledger/wasp/packages/chain"
-	"github.com/iotaledger/wasp/packages/chain/messages"
 	"github.com/iotaledger/wasp/packages/iscp"
 	"github.com/iotaledger/wasp/packages/iscp/coreutil"
 	"github.com/iotaledger/wasp/packages/iscp/request"
@@ -82,9 +81,6 @@ func (c *chainObj) Dismiss(reason string) {
 		}
 		c.eventRequestProcessed.DetachAll()
 		c.eventChainTransition.DetachAll()
-		for _, attachID := range c.attachIDs {
-			(*c.peers).Detach(attachID)
-		}
 	})
 
 	publisher.Publish("dismissed_chain", c.chainID.Base58())
@@ -94,8 +90,12 @@ func (c *chainObj) IsDismissed() bool {
 	return c.dismissed.Load()
 }
 
-func (c *chainObj) AttachToPeerMessages(fun func(recv *peering.RecvEvent)) {
-	c.attachIDs = append(c.attachIDs, (*c.peers).Attach(&c.peeringID, fun))
+func (c *chainObj) RegisterPeerMessageParty(party peering.PeerMessageSimpleParty) error {
+	return (*c.peers).RegisterPeerMessageParty(c.peeringID, party)
+}
+
+func (c *chainObj) UnregisterPeerMessageParty(partyType peering.PeerMessagePartyType) error {
+	return (*c.peers).UnregisterPeerMessageParty(c.peeringID, partyType)
 }
 
 func (c *chainObj) StateCandidateToStateManager(virtualState state.VirtualStateAccess, outputID ledgerstate.OutputID) {
@@ -119,7 +119,10 @@ func shouldSendToPeer(peerID string, ackPeers []string) bool {
 
 func (c *chainObj) broadcastOffLedgerRequest(req *request.OffLedger) {
 	c.log.Debugf("broadcastOffLedgerRequest: toNPeers: %d, reqID: %s", c.offledgerBroadcastUpToNPeers, req.ID().Base58())
-	msgData := messages.NewOffLedgerRequestPeerMsg(c.chainID, req).Bytes()
+	msg := &offLedgerRequestMsg{
+		ChainID: c.chainID,
+		Req:     req,
+	}
 	committee := c.getCommittee()
 	getPeerIDs := (*c.peers).GetRandomPeers
 
@@ -132,7 +135,7 @@ func (c *chainObj) broadcastOffLedgerRequest(req *request.OffLedger) {
 		for _, peerID := range peerIDs {
 			if shouldSendToPeer(peerID, ackPeers) {
 				c.log.Debugf("sending offledger request ID: reqID: %s, peerID: %s", req.ID().Base58(), peerID)
-				(*c.peers).SendSimple(peerID, messages.MsgOffLedgerRequest, msgData)
+				c.SendMsgByNetID(peerID, peering.PeerMessagePartyChain, msg)
 			}
 		}
 	}
@@ -170,8 +173,7 @@ func (c *chainObj) sendRequestAcknowledgementMsg(reqID iscp.RequestID, peerID st
 	if peerID == "" {
 		return
 	}
-	msgData := messages.NewRequestAckMsg(reqID).Bytes()
-	(*c.peers).SendSimple(peerID, messages.MsgRequestAck, msgData)
+	c.SendMsgByNetID(peerID, peering.PeerMessagePartyChain, &requestAckMsg{ReqID: &reqID})
 }
 
 func (c *chainObj) ReceiveRequestAckMessage(reqID *iscp.RequestID, peerID string) {

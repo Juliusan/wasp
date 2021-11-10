@@ -12,6 +12,7 @@ import (
 	"github.com/iotaledger/wasp/packages/hashing"
 	"github.com/iotaledger/wasp/packages/iscp"
 	"github.com/iotaledger/wasp/packages/state"
+	"go.dedis.ch/kyber/v3/sign/tbls"
 )
 
 func (c *Consensus) EventStateTransitionMsg(state state.VirtualStateAccess, stateOutput *ledgerstate.AliasOutput, stateTimestamp time.Time) {
@@ -29,25 +30,38 @@ func (c *Consensus) eventStateTransitionMsg(msg *messages.StateTransitionMsg) {
 	c.takeAction()
 }
 
-func (c *Consensus) EventSignedResultMsg(msg *messages.SignedResultMsg) {
-	c.eventSignedResultMsgCh <- msg
+func (c *Consensus) EnqueueSignedResult(chainInputID ledgerstate.OutputID, essenceHash hashing.HashValue, sigShare tbls.SigShare, senderIndex uint16) {
+	c.eventSignedResultMsgCh <- &signedResultMsgIn{
+		signedResultMsg: signedResultMsg{
+			ChainInputID: chainInputID,
+			EssenceHash:  essenceHash,
+			SigShare:     sigShare,
+		},
+		SenderIndex: senderIndex,
+	}
 }
 
-func (c *Consensus) eventSignedResult(msg *messages.SignedResultMsg) {
-	c.log.Debugf("SignedResultMsg received: from sender %d, hash=%s, chain input id=%v",
+func (c *Consensus) handleSignedResult(msg *signedResultMsgIn) {
+	c.log.Debugf("handleSignedResult message received: from sender %d, hash=%s, chain input id=%v",
 		msg.SenderIndex, msg.EssenceHash, iscp.OID(msg.ChainInputID))
 	c.receiveSignedResult(msg)
 	c.takeAction()
 }
 
-func (c *Consensus) EventSignedResultAckMsg(msg *messages.SignedResultAckMsg) {
-	c.eventSignedResultAckMsgCh <- msg
+func (c *Consensus) EnqueueSignedResultAck(chainInputID ledgerstate.OutputID, essenceHash hashing.HashValue, senderIndex uint16) {
+	c.eventSignedResultAckMsgCh <- &signedResultAckMsgIn{
+		signedResultAckMsg: signedResultAckMsg{
+			ChainInputID: chainInputID,
+			EssenceHash:  essenceHash,
+		},
+		SenderIndex: senderIndex,
+	}
 }
 
-func (c *Consensus) eventSignedResultAck(msg *messages.SignedResultAckMsg) {
-	c.log.Debugf("SignedResultAckMsg received: from sender %d, hash=%s, chain input id=%v",
+func (c *Consensus) handleSignedResultAck(msg *signedResultAckMsgIn) {
+	c.log.Debugf("handleSignedResultAck message received: from sender %d, hash=%s, chain input id=%v",
 		msg.SenderIndex, msg.EssenceHash, iscp.OID(msg.ChainInputID))
-	c.receiveSignedResultAck(msg)
+	c.receiveSignedResultAck(msg.ChainInputID, msg.EssenceHash, msg.SenderIndex)
 	c.takeAction()
 }
 
