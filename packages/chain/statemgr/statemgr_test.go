@@ -152,7 +152,7 @@ func testManyStateTransitions(t *testing.T, pushStateToNodes bool) {
 // optionally, mocked node connection pushes new transactions to state managers or not.
 // If not, state manager has to retrieve it with pull
 func TestManyStateTransitionsSeveralNodes(t *testing.T) {
-	env := NewMockedEnv(2, t, false)
+	env := NewMockedEnv(2, t, true)
 	env.SetPushStateToNodesOption(true)
 
 	node0 := NewMockedNode(env, 0, NewStateManagerTimers())
