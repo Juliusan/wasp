@@ -71,7 +71,7 @@ func (g *GenBase) close() {
 	_ = g.file.Close()
 }
 
-func (g *GenBase) createFile(path string, overwrite bool, generator func()) (err error) {
+func (g *GenBase) createFile(path string, overwrite bool, generator func() error) (err error) {
 	if !overwrite && g.exists(path) == nil {
 		return nil
 	}
@@ -80,8 +80,7 @@ func (g *GenBase) createFile(path string, overwrite bool, generator func()) (err
 		return err
 	}
 	defer g.close()
-	generator()
-	return nil
+	return generator()
 }
 
 func (g *GenBase) createSourceFile(name string, condition bool) error {
@@ -90,10 +89,11 @@ func (g *GenBase) createSourceFile(name string, condition bool) error {
 		_ = os.Remove(path)
 		return nil
 	}
-	return g.createFile(path, true, func() {
+	return g.createFile(path, true, func() error {
 		g.emit("copyright")
 		g.emit("warning")
 		g.emit(name + g.extension)
+		return nil
 	})
 }
 
@@ -196,13 +196,14 @@ func (g *GenBase) generateCode() error {
 	return nil
 }
 
-func (g *GenBase) generateFuncs(appendFuncs func(existing model.StringMap)) error {
+func (g *GenBase) generateFuncs(appendFuncs func(existing model.StringMap) bool) error {
 	scFileName := g.folder + g.s.PackageName + g.extension
 	if g.exists(scFileName) != nil {
 		// generate initial SC function file
-		return g.createFile(scFileName, false, func() {
+		return g.createFile(scFileName, false, func() error {
 			g.emit("copyright")
 			g.emit("funcs" + g.extension)
+			return nil
 		})
 	}
 
@@ -216,35 +217,31 @@ func (g *GenBase) generateFuncs(appendFuncs func(existing model.StringMap)) erro
 		return err
 	}
 
-	// save old one from overwrite
-	scOriginal := g.folder + g.s.PackageName + ".bak"
-	err = os.Rename(scFileName, scOriginal)
-	if err != nil {
-		return err
-	}
-
-	err = g.createFile(scFileName, false, func() {
+	scNew := g.folder + g.s.PackageName + ".new"
+	return g.createFile(scNew, true, func() error {
 		// make copy of original file
 		for _, line := range lines {
 			g.println(line)
 		}
 
 		// append any new funcs
-		appendFuncs(existing)
+		if appendFuncs(existing) {
+			return os.Rename(scNew, scFileName)
+		}
+		return os.Remove(scNew)
 	})
-	if err != nil {
-		return err
-	}
-	return os.Remove(scOriginal)
 }
 
-func (g *GenBase) appendFuncs(existing model.StringMap) {
+func (g *GenBase) appendFuncs(existing model.StringMap) bool {
+	appended := false
 	for _, g.currentFunc = range g.s.Funcs {
 		if existing[g.funcName(g.currentFunc)] == "" {
 			g.setFuncKeys(false, 0, 0)
 			g.emit("funcSignature")
+			appended = true
 		}
 	}
+	return appended
 }
 
 func (g *GenBase) generateTests() error {
@@ -256,8 +253,9 @@ func (g *GenBase) generateTests() error {
 	// do not overwrite existing file
 	name := strings.ToLower(g.s.PackageName)
 	filename := "test/" + name + "_test.go"
-	return g.createFile(filename, false, func() {
+	return g.createFile(filename, false, func() error {
 		g.emit("test.go")
+		return nil
 	})
 }
 

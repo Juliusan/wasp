@@ -32,7 +32,8 @@ func (g *TypeScriptGenerator) Generate() error {
 	}
 
 	tsconfig := "tsconfig.json"
-	return g.createFile(g.folder+tsconfig, false, func() {
+	return g.createFile(g.folder+tsconfig, true, func() error {
 		g.emit(tsconfig)
+		return nil
 	})
 }

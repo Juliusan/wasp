@@ -31,7 +31,8 @@ func (g *RustGenerator) Generate() error {
 	}
 
 	cargoToml := "Cargo.toml"
-	return g.createFile(cargoToml, false, func() {
+	return g.createFile(cargoToml, false, func() error {
 		g.emit(cargoToml)
+		return nil
 	})
 }
