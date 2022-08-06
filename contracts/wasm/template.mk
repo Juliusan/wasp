@@ -6,7 +6,7 @@ FILES_TS=$(patsubst %, ts/$(CONTRACT)/%.ts, $(FILES)) ts/$(CONTRACT)/index.ts ts
 all: build
 
 schema-tool-install:
-	make --no-print-directory -C $(TOP_DIR) schema-tool-install
+	@make --no-print-directory -C $(TOP_DIR) schema-tool-install
 
 build: build-go build-rust build-ts
 
