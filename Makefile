@@ -8,6 +8,11 @@ BUILD_LD_FLAGS = "-X github.com/iotaledger/wasp/packages/wasp.VersionHash=$(GIT_
 #
 TEST_PKG=./...
 TEST_ARG=
+CONTRACTS=corecontracts dividend donatewithfeedback erc20 erc721 fairauction fairroulette helloworld inccounter schemacomment testcore testwasmlib timestamp tokenregistry gascalibration/executiontime gascalibration/memory gascalibration/storage
+WASM_CONTRACT_TARGETS=$(patsubst %, wasm-build-%, $(CONTRACTS))
+WASM_CONTRACT_TARGETS_GO=$(patsubst %, wasm-build-%-go, $(CONTRACTS))
+WASM_CONTRACT_TARGETS_RUST=$(patsubst %, wasm-build-%-rust, $(CONTRACTS))
+WASM_CONTRACT_TARGETS_TS=$(patsubst %, wasm-build-%-ts, $(CONTRACTS))
 
 all: build-lint
 
@@ -52,5 +57,20 @@ docker-build:
 		--build-arg BUILD_LD_FLAGS='${BUILD_LD_FLAGS}' \
 		.
 
-.PHONY: all build build-lint test test-short test-full install lint gofumpt-list docker-build
+schema-tool-install:
+	go install ./tools/schema
 
+wasm-build: $(WASM_CONTRACT_TARGETS)
+
+$(WASM_CONTRACT_TARGETS): wasm-build-%: wasm-build-%-go wasm-build-%-rust wasm-build-%-ts
+
+$(WASM_CONTRACT_TARGETS_GO): wasm-build-%-go:
+	make --no-print-directory -C contracts/wasm/$* build-go
+
+$(WASM_CONTRACT_TARGETS_RUST): wasm-build-%-rust:
+	make --no-print-directory -C contracts/wasm/$* build-rust
+
+$(WASM_CONTRACT_TARGETS_TS): wasm-build-%-ts:
+	make --no-print-directory -C contracts/wasm/$* build-ts
+
+.PHONY: all wasm compile-solidity build build-lint test-full test test-short install lint gofumpt-list docker-build schema-tool-install wasm-build $(WASM_CONTRACT_TARGETS) $(WASM_CONTRACT_TARGETS_GO) $(WASM_CONTRACT_TARGETS_RUST) $(WASM_CONTRACT_TARGETS_TS)
