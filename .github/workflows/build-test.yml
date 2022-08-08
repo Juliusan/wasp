@@ -122,6 +122,6 @@ jobs:
 
       - name: Run golangci-lint
         run: |
-          PATH=$PATH:./bin/
+          PATH=$PATH:$(pwd)/bin/
           make wasm-build
           make lint
