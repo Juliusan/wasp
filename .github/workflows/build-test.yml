@@ -122,4 +122,5 @@ jobs:
 
       - name: Run golangci-lint
         run: |
+          PATH=$PATH:./bin/
           make lint
