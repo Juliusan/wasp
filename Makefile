@@ -20,10 +20,6 @@ SCHEMA_TOOL_FILES_ABS=$(patsubst %, tools/schema/%, $(SCHEMA_TOOL_FILES))
 
 all: build-lint
 
-wasm:
-	go install ./tools/schema
-	bash contracts/wasm/scripts/generate_wasm.sh
-
 compile-solidity:
 ifeq (, $(shell which solc))
 	@echo "no solc found in PATH, evm contracts won't be compiled"
@@ -32,7 +28,7 @@ else
 	cd packages/evm/evmtest && if ! git diff --quiet *.sol; then go generate; fi
 endif
 
-build: compile-solidity
+build: wasm-build compile-solidity
 	go build -o . -tags $(BUILD_TAGS) -ldflags $(BUILD_LD_FLAGS) ./...
 
 build-lint: build lint
@@ -46,10 +42,10 @@ test: install
 test-short:
 	go test -tags $(BUILD_TAGS) --short --count 1 -failfast $(shell go list ./... | grep -v github.com/iotaledger/wasp/contracts/wasm | grep -v github.com/iotaledger/wasp/packages/vm/)
 
-install: compile-solidity
+install: wasm-build compile-solidity
 	go install -tags $(BUILD_TAGS) -ldflags $(BUILD_LD_FLAGS) ./...
 
-lint:
+lint: wasm-fix-lint
 	golangci-lint run
 
 gofumpt-list:
@@ -80,4 +76,7 @@ $(WASM_CONTRACT_TARGETS_RUST): wasm-build-%-rust:
 $(WASM_CONTRACT_TARGETS_TS): wasm-build-%-ts:
 	@make --no-print-directory -C contracts/wasm/$* build-ts
 
-.PHONY: all wasm compile-solidity build build-lint test-full test test-short install lint gofumpt-list docker-build schema-tool-install wasm-build $(WASM_CONTRACT_TARGETS) $(WASM_CONTRACT_TARGETS_GO) $(WASM_CONTRACT_TARGETS_RUST) $(WASM_CONTRACT_TARGETS_TS)
+wasm-fix-lint: wasm-build
+	cd contracts/wasm && golangci-lint run --fix
+
+.PHONY: all compile-solidity build build-lint test-full test test-short install lint gofumpt-list docker-build schema-tool-install wasm-build $(WASM_CONTRACT_TARGETS) $(WASM_CONTRACT_TARGETS_GO) $(WASM_CONTRACT_TARGETS_RUST) $(WASM_CONTRACT_TARGETS_TS) wasm-fix-lint
