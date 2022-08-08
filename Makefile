@@ -35,9 +35,6 @@ WASM_CONTRACT_TARGETS_RUST=$(patsubst %, wasm-build-%-rust, $(CONTRACTS))
 WASM_CONTRACT_TARGETS_TS=$(patsubst %, wasm-build-%-ts, $(CONTRACTS))
 WASM_CONTRACT_TARGETS_CLEAN=$(patsubst %, wasm-clean-%, $(CONTRACTS))
 
-include tools/schema/shema_tool_files.mk
-SCHEMA_TOOL_FILES_ABS=$(patsubst %, tools/schema/%, $(SCHEMA_TOOL_FILES))
-
 all: build-lint
 
 compile-solidity:
@@ -80,7 +77,7 @@ docker-build:
 schema-tool-install: $(GO_INSTALL_DIR)/schema
 	@:	#to suppress "Nothing to be done" warning
 
-$(GO_INSTALL_DIR)/schema: $(SCHEMA_TOOL_FILES_ABS)
+$(GO_INSTALL_DIR)/schema: $(shell find tools/schema/ -type f -name "*.go" | sed 's/ /\\ /g' | grep -v "_test.go$$")
 	go install ./tools/schema
 
 wasm-build: $(WASM_CONTRACT_TARGETS)
