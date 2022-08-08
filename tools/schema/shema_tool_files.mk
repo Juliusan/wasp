@@ -1,3 +1,4 @@
+# List all the files changes to which should trigger a schema tool reinstalation
 SCHEMA_TOOL_FILES= main.go\
 				   generator/emitter.go\
 				   generator/generator.go\

@@ -1,3 +1,9 @@
+# Common target definitions for any contract Makefile. Each contract Makefile should
+# define following variables:
+# FILES - list of files (without extension) that are build in this contract
+# TOP_DIR - path to the root folder of wasp project
+# Each contract Makefile should also include this template.
+
 CONTRACT=$(notdir $(shell pwd))
 FILES_GO=$(patsubst %, go/$(CONTRACT)/%.go, $(FILES)) go/main.go
 FILES_RS=$(patsubst %, src/%.rs, $(FILES))

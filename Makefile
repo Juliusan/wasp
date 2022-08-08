@@ -9,7 +9,26 @@ GO_INSTALL_DIR=$(if $(GOBIN),$(GOBIN),$(if $(GOPATH),$(GOPATH/bin),~/go/bin))
 #
 TEST_PKG=./...
 TEST_ARG=
-CONTRACTS=corecontracts dividend donatewithfeedback erc20 erc721 fairauction fairroulette helloworld inccounter schemacomment testcore testwasmlib timestamp tokenregistry gascalibration/executiontime gascalibration/memory gascalibration/storage
+
+# List all the contracts that should be built before instalation
+CONTRACTS=\
+	corecontracts\
+	dividend\
+	donatewithfeedback\
+	erc20\
+	erc721\
+	fairauction\
+	fairroulette\
+	helloworld\
+	inccounter\
+	schemacomment\
+	testcore\
+	testwasmlib\
+	timestamp\
+	tokenregistry\
+	gascalibration/executiontime\
+	gascalibration/memory\
+	gascalibration/storage
 WASM_CONTRACT_TARGETS=$(patsubst %, wasm-build-%, $(CONTRACTS))
 WASM_CONTRACT_TARGETS_GO=$(patsubst %, wasm-build-%-go, $(CONTRACTS))
 WASM_CONTRACT_TARGETS_RUST=$(patsubst %, wasm-build-%-rust, $(CONTRACTS))
