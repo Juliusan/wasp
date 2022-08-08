@@ -14,6 +14,7 @@ WASM_CONTRACT_TARGETS=$(patsubst %, wasm-build-%, $(CONTRACTS))
 WASM_CONTRACT_TARGETS_GO=$(patsubst %, wasm-build-%-go, $(CONTRACTS))
 WASM_CONTRACT_TARGETS_RUST=$(patsubst %, wasm-build-%-rust, $(CONTRACTS))
 WASM_CONTRACT_TARGETS_TS=$(patsubst %, wasm-build-%-ts, $(CONTRACTS))
+WASM_CONTRACT_TARGETS_CLEAN=$(patsubst %, wasm-clean-%, $(CONTRACTS))
 
 include tools/schema/shema_tool_files.mk
 SCHEMA_TOOL_FILES_ABS=$(patsubst %, tools/schema/%, $(SCHEMA_TOOL_FILES))
@@ -76,4 +77,9 @@ $(WASM_CONTRACT_TARGETS_RUST): wasm-build-%-rust:
 $(WASM_CONTRACT_TARGETS_TS): wasm-build-%-ts:
 	@make --no-print-directory -C contracts/wasm/$* build-ts
 
-.PHONY: all compile-solidity build build-lint test-full test test-short install lint gofumpt-list docker-build schema-tool-install wasm-build $(WASM_CONTRACT_TARGETS) $(WASM_CONTRACT_TARGETS_GO) $(WASM_CONTRACT_TARGETS_RUST) $(WASM_CONTRACT_TARGETS_TS)
+wasm-clean: $(WASM_CONTRACT_TARGETS_CLEAN)
+
+$(WASM_CONTRACT_TARGETS_CLEAN): wasm-clean-%:
+	@make --no-print-directory -C contracts/wasm/$* clean
+
+.PHONY: all compile-solidity build build-lint test-full test test-short install lint gofumpt-list docker-build schema-tool-install wasm-build $(WASM_CONTRACT_TARGETS) $(WASM_CONTRACT_TARGETS_GO) $(WASM_CONTRACT_TARGETS_RUST) $(WASM_CONTRACT_TARGETS_TS) wasm-clean $(WASM_CONTRACT_TARGETS_CLEAN)

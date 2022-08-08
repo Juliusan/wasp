@@ -28,3 +28,14 @@ build-ts: schema-tool-install $(FILES_TS)
 $(FILES_TS): schema.yaml ts/$(CONTRACT)/$(CONTRACT).ts
 	@echo "Generating TypeScript files for contract $(CONTRACT)"
 	schema -ts
+
+clean: clean-go clean-rust clean-ts
+
+clean-go:
+	rm $(FILES_GO)
+
+clean-rust:
+	rm $(FILES_RS)
+
+clean-ts:
+	rm $(FILES_TS)
