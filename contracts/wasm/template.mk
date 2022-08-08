@@ -15,6 +15,7 @@ build-go: schema-tool-install $(FILES_GO)
 $(FILES_GO): schema.yaml go/$(CONTRACT)/$(CONTRACT).go
 	@echo "Generating Go files for contract $(CONTRACT)"
 	schema -go
+	golangci-lint run --fix
 
 build-rust: schema-tool-install $(FILES_RS)
 

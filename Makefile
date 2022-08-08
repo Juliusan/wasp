@@ -45,7 +45,7 @@ test-short:
 install: wasm-build compile-solidity
 	go install -tags $(BUILD_TAGS) -ldflags $(BUILD_LD_FLAGS) ./...
 
-lint: wasm-fix-lint
+lint:
 	golangci-lint run
 
 gofumpt-list:
@@ -76,7 +76,4 @@ $(WASM_CONTRACT_TARGETS_RUST): wasm-build-%-rust:
 $(WASM_CONTRACT_TARGETS_TS): wasm-build-%-ts:
 	@make --no-print-directory -C contracts/wasm/$* build-ts
 
-wasm-fix-lint: wasm-build
-	cd contracts/wasm && golangci-lint run --fix
-
-.PHONY: all compile-solidity build build-lint test-full test test-short install lint gofumpt-list docker-build schema-tool-install wasm-build $(WASM_CONTRACT_TARGETS) $(WASM_CONTRACT_TARGETS_GO) $(WASM_CONTRACT_TARGETS_RUST) $(WASM_CONTRACT_TARGETS_TS) wasm-fix-lint
+.PHONY: all compile-solidity build build-lint test-full test test-short install lint gofumpt-list docker-build schema-tool-install wasm-build $(WASM_CONTRACT_TARGETS) $(WASM_CONTRACT_TARGETS_GO) $(WASM_CONTRACT_TARGETS_RUST) $(WASM_CONTRACT_TARGETS_TS)
