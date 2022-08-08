@@ -66,7 +66,7 @@ install: wasm-build compile-solidity
 	go install -tags $(BUILD_TAGS) -ldflags $(BUILD_LD_FLAGS) ./...
 
 lint:
-	golangci-lint run
+	golangci-lint run --timeout 5m0s
 
 gofumpt-list:
 	gofumpt -l ./
