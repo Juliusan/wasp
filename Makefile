@@ -48,7 +48,7 @@ else
 	cd packages/evm/evmtest && if ! git diff --quiet *.sol; then go generate; fi
 endif
 
-build: wasm-build compile-solidity
+build: compile-solidity
 	go build -o . -tags $(BUILD_TAGS) -ldflags $(BUILD_LD_FLAGS) ./...
 
 build-lint: build lint
