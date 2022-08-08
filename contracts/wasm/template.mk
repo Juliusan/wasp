@@ -39,3 +39,5 @@ clean-rust:
 
 clean-ts:
 	rm $(FILES_TS)
+
+.PHONY: all schema-tool-install build build-go build-rust build-ts clean clean-go clean-rust clean-ts
