@@ -29,7 +29,7 @@ jobs:
 
       - name: Test
         run: make test-short
-  
+
   contract-test:
     name: Wasm contract tests
     runs-on: ubuntu-latest
@@ -51,7 +51,7 @@ jobs:
           wget https://github.com/tinygo-org/tinygo/releases/download/v0.23.0/tinygo_0.23.0_amd64.deb
           sudo dpkg -i tinygo_0.23.0_amd64.deb
           export PATH=$PATH:/usr/local/bin
-      
+
       - name: install rust-toolchain
         uses: actions-rs/toolchain@v1.0.6
         with:
@@ -61,7 +61,7 @@ jobs:
         run: |
           curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: install Node.js 
+      - name: install Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
@@ -103,7 +103,7 @@ jobs:
           elif [ $TEST_LANG == "rswasm" ]; then
             go test ./... -rswasm
           fi
-          
+
   golangci:
     name: Lint
     runs-on: ubuntu-latest
@@ -121,12 +121,10 @@ jobs:
            cd contracts/wasm/scripts
            bash schema_all.sh
 
-      - name: golangci-lint in SC
+      - name: Install golangci-lint
         run: |
            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.47.2
-           cd contracts/wasm
-           ../../bin/golangci-lint run --fix --timeout 5m0s
-           
-      - name: Run global scope golangci-lint
+
+      - name: Run golangci-lint
         run: |
-          ./bin/golangci-lint run --timeout 5m0s
+          make lint
