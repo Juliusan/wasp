@@ -40,10 +40,11 @@ func NewBlockCache(log *logger.Logger, timersOpt ...BlockCacheTimers) *BlockCach
 	return result
 }
 
-func (bcT *BlockCache) AddBlock(block state.Block) {
+func (bcT *BlockCache) AddBlock(block state.Block) error {
 	blockHash := block.GetHash()
 	//TODO: store to DB
 	bcT.addBlockToCache(blockHash, block)
+	return nil
 }
 
 func (bcT *BlockCache) addBlockToCache(blockHash state.BlockHash, block state.Block) {

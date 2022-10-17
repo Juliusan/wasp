@@ -52,14 +52,19 @@ func New(
 // -------------------------------------
 
 func (smT *stateManager) BlockProduced(ctx context.Context, aliasOutput *isc.AliasOutputWithID, block state.Block) <-chan error {
-	//TODO return
-	smT.addInput(smInputs.NewChainBlockProduced(aliasOutput, block))
-	return nil
+	input, resultCh := smInputs.NewChainBlockProduced(ctx, aliasOutput, block)
+	smT.addInput(input)
+	return resultCh
 }
 
-// TODO
-func (smT *stateManager) ReceiveConfirmedAliasOutput(aliasOutput *isc.AliasOutputWithID) {}
-func (smT *stateManager) AccessNodesUpdated(accessNodePubKeys []*cryptolib.PublicKey)    {}
+func (smT *stateManager) ReceiveConfirmedAliasOutput(aliasOutput *isc.AliasOutputWithID) {
+	smT.addInput(smInputs.NewChainReceiveConfirmedAliasOutput(aliasOutput))
+}
+
+func (smT *stateManager) AccessNodesUpdated(accessNodePubKeys []*cryptolib.PublicKey) {
+	// TODO: do it in one state manager thread
+	smT.updatePublicKeys(accessNodePubKeys)
+}
 
 // -------------------------------------
 // Implementations of consGR.StateMgr (TODO: or whatever - for consensus)

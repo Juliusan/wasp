@@ -51,14 +51,14 @@ func New(chainID *isc.ChainID, nr *smUtils.NodeRandomiser, store kvstore.KVStore
 
 func (smT *stateManagerGPA) Input(input gpa.Input) gpa.OutMessages {
 	switch inputCasted := input.(type) {
-	case *smInputs.ChainBlockProduced: // From consensus
-		return smT.handleChainBlockProduced(inputCasted.GetAliasOutputWithID(), inputCasted.GetBlock())
+	case *smInputs.ChainBlockProduced: // From chain
+		return smT.handleChainBlockProduced(inputCasted)
+	case *smInputs.ChainReceiveConfirmedAliasOutput: // From chain
+		return smT.handleChainReceiveConfirmedAliasOutput(inputCasted.GetStateOutput())
 	case *smInputs.ConsensusStateProposal: // From consensus
 		return smT.handleConsensusStateProposal(inputCasted)
 	case *smInputs.ConsensusDecidedState: // From consensus
 		return smT.handleConsensusDecidedState(inputCasted)
-		//	case *StateOutputInput: // From L1	// TODO
-		//		return gpa.NoMessages()
 	default:
 		smT.log.Warnf("Unknown input received, ignoring it: type=%T, message=%v", input, input)
 		return gpa.NoMessages()
@@ -106,23 +106,34 @@ func (smT *stateManagerGPA) handlePeerBlock(from gpa.NodeID, block state.Block) 
 	if !ok {
 		return gpa.NoMessages()
 	}
-	return smT.handleGeneralBlock(block)
+	messages, _ := smT.handleGeneralBlock(block)
+	return messages
 }
 
-func (smT *stateManagerGPA) handleChainBlockProduced(aliasOutput *isc.AliasOutputWithID, block state.Block) gpa.OutMessages {
+func (smT *stateManagerGPA) handleChainBlockProduced(input *smInputs.ChainBlockProduced) gpa.OutMessages {
 	// TODO: aliasOutput!
-	return smT.handleGeneralBlock(block)
+	messages, err := smT.handleGeneralBlock(input.GetBlock())
+	input.Respond(err)
+	return messages
 }
 
-func (smT *stateManagerGPA) handleGeneralBlock(block state.Block) gpa.OutMessages {
-	smT.blockCache.AddBlock(block)
+func (smT *stateManagerGPA) handleGeneralBlock(block state.Block) (gpa.OutMessages, error) {
+	err := smT.blockCache.AddBlock(block)
+	if err != nil {
+		return gpa.NoMessages(), err
+	}
 	blockHash := block.GetHash()
 	requests, ok := smT.blockRequests[blockHash]
 	if !ok {
-		return gpa.NoMessages()
+		return gpa.NoMessages(), nil
 	}
 	delete(smT.blockRequests, blockHash)
-	return smT.traceBlockChain(block, requests...)
+	return smT.traceBlockChain(block, requests...), nil
+}
+
+func (smT *stateManagerGPA) handleChainReceiveConfirmedAliasOutput(aliasOutput *isc.AliasOutputWithID) gpa.OutMessages {
+	// TODO: aliasOutput!
+	return gpa.NoMessages()
 }
 
 func (smT *stateManagerGPA) handleConsensusStateProposal(csp *smInputs.ConsensusStateProposal) gpa.OutMessages {

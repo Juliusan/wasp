@@ -18,7 +18,7 @@ type ConsensusDecidedState struct {
 	resultCh        chan<- *consGR.StateMgrDecidedState
 }
 
-var _ gpa.Input = &ConsensusStateProposal{}
+var _ gpa.Input = &ConsensusDecidedState{}
 
 func NewConsensusDecidedState(ctx context.Context, aliasOutputID *iotago.OutputID, sc *state.L1Commitment) (*ConsensusDecidedState, <-chan *consGR.StateMgrDecidedState) {
 	resultChannel := make(chan *consGR.StateMgrDecidedState, 1)
