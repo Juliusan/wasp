@@ -8,6 +8,10 @@ import "encoding"
 
 type NodeID string
 
+func (niT NodeID) Equals(other NodeID) bool {
+	return niT == other
+}
+
 type Message interface {
 	encoding.BinaryMarshaler
 	Recipient() NodeID // The sender should indicate the recipient.

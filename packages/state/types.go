@@ -58,7 +58,7 @@ type Block interface {
 	SetApprovingOutputID(*iotago.UTXOInput)
 	Timestamp() time.Time
 	PreviousL1Commitment() *L1Commitment
-	EssenceBytes() []byte // except state transaction id
+	GetHash() BlockHash
 	Bytes() []byte
 }
 
