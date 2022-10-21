@@ -3,7 +3,6 @@
 package smUtils
 
 import (
-	"sync"
 	"time"
 
 	"github.com/iotaledger/hive.go/core/logger"
@@ -16,27 +15,19 @@ type blockTime struct {
 }
 
 type BlockCache struct {
-	log    *logger.Logger
-	blocks map[state.BlockHash]state.Block
-	times  []*blockTime
-	timers BlockCacheTimers
-	mutex  sync.Mutex
+	log          *logger.Logger
+	blocks       map[state.BlockHash]state.Block
+	times        []*blockTime
+	timeProvider TimeProvider
 }
 
-func NewBlockCache(log *logger.Logger, timersOpt ...BlockCacheTimers) *BlockCache {
-	var timers BlockCacheTimers
-	if len(timersOpt) > 0 {
-		timers = timersOpt[0]
-	} else {
-		timers = NewBlockCacheTimers()
-	}
+func NewBlockCache(tp TimeProvider, log *logger.Logger) *BlockCache {
 	result := &BlockCache{
-		log:    log.Named("bc"),
-		blocks: make(map[state.BlockHash]state.Block),
-		times:  make([]*blockTime, 0),
-		timers: timers,
+		log:          log.Named("bc"),
+		blocks:       make(map[state.BlockHash]state.Block),
+		times:        make([]*blockTime, 0),
+		timeProvider: tp,
 	}
-	result.startCleaningLoop()
 	return result
 }
 
@@ -48,37 +39,27 @@ func (bcT *BlockCache) AddBlock(block state.Block) error {
 }
 
 func (bcT *BlockCache) addBlockToCache(blockHash state.BlockHash, block state.Block) {
-	bcT.mutex.Lock()
-	defer bcT.mutex.Unlock()
-
 	bcT.blocks[blockHash] = block
 	bcT.times = append(bcT.times, &blockTime{
-		time:      time.Now(),
+		time:      bcT.timeProvider.GetNow(),
 		blockHash: blockHash,
 	})
 	bcT.log.Debugf("Block %v added to DB and cache", blockHash)
 }
 
 func (bcT *BlockCache) GetBlock(blockHash state.BlockHash) state.Block {
-	bcT.mutex.Lock()
 	block, ok := bcT.blocks[blockHash]
-	bcT.mutex.Unlock()
 
 	if ok {
 		return block
 	}
 	//TODO: search the DB
 
-	bcT.mutex.Lock()
-	defer bcT.mutex.Unlock()
 	// if rasta –> bcT.addBlockToCache(blockHash, block)
 	return nil
 }
 
-func (bcT *BlockCache) cleanOlderThan(limit time.Time) {
-	bcT.mutex.Lock()
-	defer bcT.mutex.Unlock()
-
+func (bcT *BlockCache) CleanOlderThan(limit time.Time) {
 	for i, bt := range bcT.times {
 		if bt.time.After(limit) {
 			bcT.times = bcT.times[i:]
@@ -88,13 +69,4 @@ func (bcT *BlockCache) cleanOlderThan(limit time.Time) {
 		bcT.log.Debugf("Block %v deleted from cache", bt.blockHash)
 	}
 	bcT.times = make([]*blockTime, 0) // All the blocks were deleted
-}
-
-func (bcT *BlockCache) startCleaningLoop() {
-	go func() {
-		for {
-			bcT.cleanOlderThan(time.Now().Add(-bcT.timers.BlocksInCacheDuration))
-			time.Sleep(bcT.timers.BlockCleaningPeriod)
-		}
-	}()
 }

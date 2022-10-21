@@ -8,6 +8,8 @@
 package smGPA
 
 import (
+	"time"
+
 	"github.com/iotaledger/hive.go/core/kvstore"
 	"github.com/iotaledger/hive.go/core/logger"
 	"github.com/iotaledger/wasp/packages/chain/statemanager/smInputs"
@@ -19,12 +21,15 @@ import (
 )
 
 type stateManagerGPA struct {
-	log            *logger.Logger
-	chainID        *isc.ChainID
-	store          kvstore.KVStore
-	blockCache     *smUtils.BlockCache
-	blockRequests  map[state.BlockHash]([]blockRequest) //nolint:gocritic // removing brackets doesn't make code simpler or clearer
-	nodeRandomiser *smUtils.NodeRandomiser
+	log                     *logger.Logger
+	chainID                 *isc.ChainID
+	store                   kvstore.KVStore
+	blockCache              *smUtils.BlockCache
+	blockRequests           map[state.BlockHash]([]blockRequest) //nolint:gocritic // removing brackets doesn't make code simpler or clearer
+	nodeRandomiser          *smUtils.NodeRandomiser
+	timers                  StateManagerTimers
+	lastGetBlocksTime       time.Time
+	lastCleanBlockCacheTime time.Time
 }
 
 var _ gpa.GPA = &stateManagerGPA{}
@@ -33,15 +38,24 @@ const (
 	numberOfNodesToRequestBlockFromConst = 5
 )
 
-func New(chainID *isc.ChainID, nr *smUtils.NodeRandomiser, store kvstore.KVStore, log *logger.Logger) gpa.GPA {
+func New(chainID *isc.ChainID, nr *smUtils.NodeRandomiser, store kvstore.KVStore, log *logger.Logger, timersOpt ...StateManagerTimers) gpa.GPA {
 	smLog := log.Named("sm")
+	var timers StateManagerTimers
+	if len(timersOpt) > 0 {
+		timers = timersOpt[0]
+	} else {
+		timers = NewStateManagerTimers()
+	}
 	return &stateManagerGPA{
-		log:            smLog,
-		chainID:        chainID,
-		store:          store,
-		blockCache:     smUtils.NewBlockCache(smLog),
-		blockRequests:  make(map[state.BlockHash][]blockRequest),
-		nodeRandomiser: nr,
+		log:                     smLog,
+		chainID:                 chainID,
+		store:                   store,
+		blockCache:              smUtils.NewBlockCache(timers.TimeProvider, smLog),
+		blockRequests:           make(map[state.BlockHash][]blockRequest),
+		nodeRandomiser:          nr,
+		timers:                  timers,
+		lastGetBlocksTime:       time.Time{},
+		lastCleanBlockCacheTime: time.Time{},
 	}
 }
 
@@ -59,6 +73,8 @@ func (smT *stateManagerGPA) Input(input gpa.Input) gpa.OutMessages {
 		return smT.handleConsensusStateProposal(inputCasted)
 	case *smInputs.ConsensusDecidedState: // From consensus
 		return smT.handleConsensusDecidedState(inputCasted)
+	case *smInputs.StateManagerTimerTick: // From state manager go routine
+		return smT.handleStateManagerTimerTick(inputCasted.GetTime())
 	default:
 		smT.log.Warnf("Unknown input received, ignoring it: type=%T, message=%v", input, input)
 		return gpa.NoMessages()
@@ -204,22 +220,40 @@ func (smT *stateManagerGPA) getBlockOrRequestMessages(blockHash state.BlockHash,
 			smT.log.Debugf("Block %s is missing, %v requests are waiting for it in addition to this one", len(currrentRequests))
 			smT.blockRequests[blockHash] = append(currrentRequests, requests...)
 		}
-		// Make `numberOfNodesToRequestBlockFromConst` messages to random peers
-		nodeIDs := smT.nodeRandomiser.GetRandomOtherNodeIDs(numberOfNodesToRequestBlockFromConst)
-		smT.log.Debugf("Requesting block %s from %v random nodes %v", blockHash, numberOfNodesToRequestBlockFromConst, nodeIDs)
-		response := gpa.NoMessages()
-		for _, nodeID := range nodeIDs {
-			response.Add(smMessages.NewGetBlockMessage(blockHash, nodeID))
-		}
-		return nil, response
+		return nil, smT.makeGetBlockRequestMessages(blockHash)
 	}
 	smT.log.Debugf("Block %s is available", blockHash)
 	return block, nil // Second parameter should not be used then
 }
 
-func (smT *stateManagerGPA) createGetBlockMessages(blockHash state.BlockHash) gpa.OutMessages {
-	// pick some number of messages to request block `blockHash` from random peers
-	return gpa.NoMessages()
+// Make `numberOfNodesToRequestBlockFromConst` messages to random peers
+func (smT *stateManagerGPA) makeGetBlockRequestMessages(blockHash state.BlockHash) gpa.OutMessages {
+	nodeIDs := smT.nodeRandomiser.GetRandomOtherNodeIDs(numberOfNodesToRequestBlockFromConst)
+	smT.log.Debugf("Requesting block %s from %v random nodes %v", blockHash, numberOfNodesToRequestBlockFromConst, nodeIDs)
+	response := gpa.NoMessages()
+	for _, nodeID := range nodeIDs {
+		response.Add(smMessages.NewGetBlockMessage(blockHash, nodeID))
+	}
+	return response
+}
+
+func (smT *stateManagerGPA) handleStateManagerTimerTick(now time.Time) gpa.OutMessages {
+	result := gpa.NoMessages()
+	smT.log.Debugf("Input received: timer tick %v", now)
+	if now.After(smT.lastGetBlocksTime.Add(smT.timers.StateManagerGetBlockRetry)) {
+		smT.log.Debugf("Timer tick: resending get block messages...")
+		for blockHash, _ := range smT.blockRequests { //nolint:gofumpt,gofmt,revive,gosimple
+			result.AddAll(smT.makeGetBlockRequestMessages(blockHash))
+		}
+		smT.lastGetBlocksTime = now
+	}
+	if now.After(smT.lastCleanBlockCacheTime.Add(smT.timers.BlockCacheBlockCleaningPeriod)) {
+		smT.log.Debugf("Timer tick: cleaning block cache...")
+		smT.blockCache.CleanOlderThan(now.Add(-smT.timers.BlockCacheBlocksInCacheDuration))
+		smT.lastCleanBlockCacheTime = now
+	}
+	smT.log.Debugf("Timer tick %v handled", now)
+	return result
 }
 
 func (smT *stateManagerGPA) createOriginState() (state.VirtualStateAccess, error) {
