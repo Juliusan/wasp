@@ -255,6 +255,7 @@ func (smT *stateManagerGPA) handleStateManagerTimerTick(now time.Time) gpa.OutMe
 	}
 	if now.After(smT.lastCleanRequestsTime.Add(smT.timers.StateManagerRequestCleaningPeriod)) {
 		smT.log.Debugf("Timer tick: cleaning requests...")
+		newBlockRequestsMap := make(map[state.BlockHash]([]blockRequest)) //nolint:gocritic
 		for blockHash, blockRequests := range smT.blockRequests {
 			outI := 0
 			for _, blockRequest := range blockRequests {
@@ -266,10 +267,13 @@ func (smT *stateManagerGPA) handleStateManagerTimerTick(now time.Time) gpa.OutMe
 			for i := outI; i < len(blockRequests); i++ {
 				blockRequests[i] = nil // Not needed requests at the end - freeing memory
 			}
-			smT.blockRequests[blockHash] = blockRequests[:outI]
+			blockRequests = blockRequests[:outI]
+			if len(blockRequests) > 0 {
+				newBlockRequestsMap[blockHash] = blockRequests
+			}
 		}
-		smT.blockCache.CleanOlderThan(now.Add(-smT.timers.BlockCacheBlocksInCacheDuration))
-		smT.lastCleanBlockCacheTime = now
+		smT.blockRequests = newBlockRequestsMap
+		smT.lastCleanRequestsTime = now
 	}
 	smT.log.Debugf("Timer tick %v handled", now)
 	return result
