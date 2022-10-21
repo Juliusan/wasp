@@ -62,7 +62,7 @@ type StateMgr interface {
 	// output (presented as aliasOutputID+stateCommitment) is present in the DB.
 	ConsensusDecidedState(
 		ctx context.Context,
-		aliasOutputID *iotago.OutputID,
+		aliasOutputID iotago.OutputID,
 		stateCommitment *state.L1Commitment,
 	) <-chan *StateMgrDecidedState
 }
@@ -340,7 +340,7 @@ func (cgr *ConsGr) tryHandleOutput() {
 		cgr.stateMgrStateProposalAsked = true
 	}
 	if output.NeedStateMgrDecidedState != nil && !cgr.stateMgrDecidedStateAsked {
-		cgr.stateMgrDecidedStateRespCh = cgr.stateMgr.ConsensusDecidedState(cgr.ctx, output.NeedStateMgrDecidedState.AliasOutputID, output.NeedStateMgrDecidedState.StateCommitment)
+		cgr.stateMgrDecidedStateRespCh = cgr.stateMgr.ConsensusDecidedState(cgr.ctx, *output.NeedStateMgrDecidedState.AliasOutputID, output.NeedStateMgrDecidedState.StateCommitment)
 		cgr.stateMgrDecidedStateAsked = true
 	}
 	if output.NeedVMResult != nil && !cgr.vmAsked {

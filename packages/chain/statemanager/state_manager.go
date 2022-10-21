@@ -79,7 +79,7 @@ func (smT *stateManager) ConsensusStateProposal(ctx context.Context, aliasOutput
 }
 
 // ConsensusDecidedState asks State manager to return a virtual state vith stateCommitment as its state commitment
-func (smT *stateManager) ConsensusDecidedState(ctx context.Context, aliasOutputID *iotago.OutputID, stateCommitment *state.L1Commitment) <-chan *consGR.StateMgrDecidedState {
+func (smT *stateManager) ConsensusDecidedState(ctx context.Context, aliasOutputID iotago.OutputID, stateCommitment *state.L1Commitment) <-chan *consGR.StateMgrDecidedState {
 	input, resultCh := smInputs.NewConsensusDecidedState(ctx, aliasOutputID, stateCommitment)
 	smT.addInput(input)
 	return resultCh

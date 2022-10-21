@@ -4,7 +4,6 @@
 package smUtils
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,7 +20,7 @@ func TestGetRandomOtherNodeIDs(t *testing.T) {
 	nodeIDsToGet := 5
 	iterationCount := 13
 
-	nodeIDs := makeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7}) // 7 nodes excluding self
+	nodeIDs := MakeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7}) // 7 nodes excluding self
 	me := nodeIDs[meIndex]
 	randomiser := NewNodeRandomiser(me, nodeIDs)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs, me)
@@ -35,7 +34,7 @@ func TestGetRandomOtherNodeIDsToFew(t *testing.T) {
 	nodeIDsToGet := 5
 	iterationCount := 1
 
-	nodeIDs := makeNodeIDs([]int{0, 1, 2, 3}) // 3 nodes excluding self
+	nodeIDs := MakeNodeIDs([]int{0, 1, 2, 3}) // 3 nodes excluding self
 	me := nodeIDs[meIndex]
 	randomiser := NewNodeRandomiser(me, nodeIDs)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, 3, iterationCount, nodeIDs, me)
@@ -48,11 +47,11 @@ func TestGetRandomOtherNodeIDsAfterChanges(t *testing.T) {
 	nodeIDsToGet := 5
 	iterationCount := 7
 
-	nodeIDs0 := makeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7})
-	nodeIDs1 := makeNodeIDs([]int{0, 2, 3, 5, 6, 7})
-	nodeIDs2 := makeNodeIDs([]int{0, 2, 3, 5, 6, 7, 8})
-	nodeIDs3 := makeNodeIDs([]int{0, 2, 3, 5, 6, 7})
-	nodeIDs4 := makeNodeIDs([]int{0, 2, 3, 4, 5, 6, 7, 9})
+	nodeIDs0 := MakeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7})
+	nodeIDs1 := MakeNodeIDs([]int{0, 2, 3, 5, 6, 7})
+	nodeIDs2 := MakeNodeIDs([]int{0, 2, 3, 5, 6, 7, 8})
+	nodeIDs3 := MakeNodeIDs([]int{0, 2, 3, 5, 6, 7})
+	nodeIDs4 := MakeNodeIDs([]int{0, 2, 3, 4, 5, 6, 7, 9})
 	me := nodeIDs0[0]
 	randomiser := NewNodeRandomiser(me, nodeIDs0)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs0, me)
@@ -64,18 +63,6 @@ func TestGetRandomOtherNodeIDsAfterChanges(t *testing.T) {
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs3, me)
 	randomiser.UpdateNodeIDs(nodeIDs4)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs4, me)
-}
-
-func makeNodeID(index int) gpa.NodeID {
-	return gpa.NodeID(fmt.Sprintf("Node%v", index))
-}
-
-func makeNodeIDs(indexes []int) []gpa.NodeID {
-	result := make([]gpa.NodeID, len(indexes))
-	for i := range indexes {
-		result[i] = makeNodeID(indexes[i])
-	}
-	return result
 }
 
 func testGetRandomOtherNodeIDs(t *testing.T, randomiser *NodeRandomiser, nodeIDsToGet, nodeIDsGot, iterationCount int, nodeIDs []gpa.NodeID, me gpa.NodeID) {

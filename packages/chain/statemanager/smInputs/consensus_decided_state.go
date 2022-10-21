@@ -13,14 +13,14 @@ import (
 
 type ConsensusDecidedState struct {
 	context         context.Context
-	aliasOutputID   *iotago.OutputID
+	aliasOutputID   iotago.OutputID
 	stateCommitment *state.L1Commitment
 	resultCh        chan<- *consGR.StateMgrDecidedState
 }
 
 var _ gpa.Input = &ConsensusDecidedState{}
 
-func NewConsensusDecidedState(ctx context.Context, aliasOutputID *iotago.OutputID, sc *state.L1Commitment) (*ConsensusDecidedState, <-chan *consGR.StateMgrDecidedState) {
+func NewConsensusDecidedState(ctx context.Context, aliasOutputID iotago.OutputID, sc *state.L1Commitment) (*ConsensusDecidedState, <-chan *consGR.StateMgrDecidedState) {
 	resultChannel := make(chan *consGR.StateMgrDecidedState, 1)
 	return &ConsensusDecidedState{
 		context:         ctx,
@@ -30,7 +30,7 @@ func NewConsensusDecidedState(ctx context.Context, aliasOutputID *iotago.OutputI
 	}, resultChannel
 }
 
-func (cdsT *ConsensusDecidedState) GetAliasOutputID() *iotago.OutputID {
+func (cdsT *ConsensusDecidedState) GetAliasOutputID() iotago.OutputID {
 	return cdsT.aliasOutputID
 }
 

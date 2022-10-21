@@ -18,7 +18,7 @@ type ChainBlockProduced struct {
 var _ gpa.Input = &ChainBlockProduced{}
 
 func NewChainBlockProduced(ctx context.Context, aliasOutput *isc.AliasOutputWithID, block state.Block) (*ChainBlockProduced, <-chan error) {
-	resultChannel := make(chan error)
+	resultChannel := make(chan error, 1)
 	return &ChainBlockProduced{
 		context:     ctx,
 		aliasOutput: aliasOutput,

@@ -10,7 +10,6 @@ type createOriginStateFun func() (state.VirtualStateAccess, error)
 type consensusDecidedStateBlockRequest struct {
 	consensusDecidedState *smInputs.ConsensusDecidedState
 	done                  bool
-	lastBlockHash         state.BlockHash
 	blocks                []state.Block
 	createOriginStateFun  createOriginStateFun
 }
@@ -21,14 +20,13 @@ func newConsensusDecidedStateBlockRequest(input *smInputs.ConsensusDecidedState,
 	return &consensusDecidedStateBlockRequest{
 		consensusDecidedState: input,
 		done:                  false,
-		lastBlockHash:         input.GetStateCommitment().BlockHash,
 		blocks:                make([]state.Block, 0),
 		createOriginStateFun:  createOriginStateFun,
 	}
 }
 
 func (cspbrT *consensusDecidedStateBlockRequest) getLastBlockHash() state.BlockHash {
-	return cspbrT.lastBlockHash
+	return cspbrT.consensusDecidedState.GetStateCommitment().BlockHash
 }
 
 func (cspbrT *consensusDecidedStateBlockRequest) blockAvailable(block state.Block) {
