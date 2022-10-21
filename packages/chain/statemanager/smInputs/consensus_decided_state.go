@@ -38,8 +38,12 @@ func (cdsT *ConsensusDecidedState) GetStateCommitment() *state.L1Commitment {
 	return cdsT.stateCommitment
 }
 
+func (cdsT *ConsensusDecidedState) IsValid() bool {
+	return cdsT.context.Err() == nil
+}
+
 func (cdsT *ConsensusDecidedState) Respond(aliasOutput *isc.AliasOutputWithID, stateBaseline coreutil.StateBaseline, virtualStateAccess state.VirtualStateAccess) {
-	if !cdsT.IsResultChClosed() {
+	if cdsT.IsValid() && !cdsT.IsResultChClosed() {
 		cdsT.resultCh <- &consGR.StateMgrDecidedState{
 			AliasOutput:        aliasOutput,
 			StateBaseline:      stateBaseline,

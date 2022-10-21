@@ -16,6 +16,8 @@ type StateManagerTimers struct {
 	BlockCacheBlockCleaningPeriod time.Duration
 	// How often get block requests should be repeated
 	StateManagerGetBlockRetry time.Duration
+	// How often requests waiting for response should be checked for expired context
+	StateManagerRequestCleaningPeriod time.Duration
 
 	TimeProvider smUtils.TimeProvider
 }
@@ -28,9 +30,10 @@ func NewStateManagerTimers(tpOpt ...smUtils.TimeProvider) StateManagerTimers {
 		tp = smUtils.NewDefaultTimeProvider()
 	}
 	return StateManagerTimers{
-		BlockCacheBlocksInCacheDuration: 1 * time.Hour,
-		BlockCacheBlockCleaningPeriod:   1 * time.Minute,
-		StateManagerGetBlockRetry:       3 * time.Second,
-		TimeProvider:                    tp,
+		BlockCacheBlocksInCacheDuration:   1 * time.Hour,
+		BlockCacheBlockCleaningPeriod:     1 * time.Minute,
+		StateManagerGetBlockRetry:         3 * time.Second,
+		StateManagerRequestCleaningPeriod: 1 * time.Second,
+		TimeProvider:                      tp,
 	}
 }

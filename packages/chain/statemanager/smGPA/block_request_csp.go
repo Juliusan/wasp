@@ -29,6 +29,10 @@ func (cspbrT *consensusStateProposalBlockRequest) getLastBlockHash() state.Block
 	return cspbrT.lastBlockHash
 }
 
+func (cspbrT *consensusStateProposalBlockRequest) isValid() bool {
+	return cspbrT.consensusStateProposal.IsValid()
+}
+
 func (cspbrT *consensusStateProposalBlockRequest) blockAvailable(block state.Block) {}
 
 func (cspbrT *consensusStateProposalBlockRequest) markCompleted() {

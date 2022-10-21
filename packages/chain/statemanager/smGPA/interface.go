@@ -7,5 +7,6 @@ import (
 type blockRequest interface {
 	getLastBlockHash() state.BlockHash
 	blockAvailable(state.Block)
+	isValid() bool
 	markCompleted()
 }

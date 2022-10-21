@@ -30,6 +30,7 @@ type stateManagerGPA struct {
 	timers                  StateManagerTimers
 	lastGetBlocksTime       time.Time
 	lastCleanBlockCacheTime time.Time
+	lastCleanRequestsTime   time.Time
 }
 
 var _ gpa.GPA = &stateManagerGPA{}
@@ -249,6 +250,24 @@ func (smT *stateManagerGPA) handleStateManagerTimerTick(now time.Time) gpa.OutMe
 	}
 	if now.After(smT.lastCleanBlockCacheTime.Add(smT.timers.BlockCacheBlockCleaningPeriod)) {
 		smT.log.Debugf("Timer tick: cleaning block cache...")
+		smT.blockCache.CleanOlderThan(now.Add(-smT.timers.BlockCacheBlocksInCacheDuration))
+		smT.lastCleanBlockCacheTime = now
+	}
+	if now.After(smT.lastCleanRequestsTime.Add(smT.timers.StateManagerRequestCleaningPeriod)) {
+		smT.log.Debugf("Timer tick: cleaning requests...")
+		for blockHash, blockRequests := range smT.blockRequests {
+			outI := 0
+			for _, blockRequest := range blockRequests {
+				if blockRequest.isValid() { // Request is valid - keeping it
+					blockRequests[outI] = blockRequest
+					outI++
+				}
+			}
+			for i := outI; i < len(blockRequests); i++ {
+				blockRequests[i] = nil // Not needed requests at the end - freeing memory
+			}
+			smT.blockRequests[blockHash] = blockRequests[:outI]
+		}
 		smT.blockCache.CleanOlderThan(now.Add(-smT.timers.BlockCacheBlocksInCacheDuration))
 		smT.lastCleanBlockCacheTime = now
 	}

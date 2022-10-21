@@ -14,7 +14,7 @@ type consensusDecidedStateBlockRequest struct {
 	createOriginStateFun  createOriginStateFun
 }
 
-var _ blockRequest = &consensusStateProposalBlockRequest{}
+var _ blockRequest = &consensusDecidedStateBlockRequest{}
 
 func newConsensusDecidedStateBlockRequest(input *smInputs.ConsensusDecidedState, createOriginStateFun createOriginStateFun) blockRequest {
 	return &consensusDecidedStateBlockRequest{
@@ -25,32 +25,36 @@ func newConsensusDecidedStateBlockRequest(input *smInputs.ConsensusDecidedState,
 	}
 }
 
-func (cspbrT *consensusDecidedStateBlockRequest) getLastBlockHash() state.BlockHash {
-	return cspbrT.consensusDecidedState.GetStateCommitment().BlockHash
+func (cdsbrT *consensusDecidedStateBlockRequest) getLastBlockHash() state.BlockHash {
+	return cdsbrT.consensusDecidedState.GetStateCommitment().BlockHash
 }
 
-func (cspbrT *consensusDecidedStateBlockRequest) blockAvailable(block state.Block) {
-	cspbrT.blocks = append(cspbrT.blocks, block)
+func (cdsbrT *consensusDecidedStateBlockRequest) isValid() bool {
+	return cdsbrT.consensusDecidedState.IsValid()
 }
 
-func (cspbrT *consensusDecidedStateBlockRequest) markCompleted() {
-	if !cspbrT.done {
-		cspbrT.done = true
-		vState, err := cspbrT.createOriginStateFun()
+func (cdsbrT *consensusDecidedStateBlockRequest) blockAvailable(block state.Block) {
+	cdsbrT.blocks = append(cdsbrT.blocks, block)
+}
+
+func (cdsbrT *consensusDecidedStateBlockRequest) markCompleted() {
+	if !cdsbrT.done {
+		cdsbrT.done = true
+		vState, err := cdsbrT.createOriginStateFun()
 		if err != nil {
 			return
 		}
-		for i := len(cspbrT.blocks) - 1; i >= 0; i-- {
+		for i := len(cdsbrT.blocks) - 1; i >= 0; i-- {
 			calculatedStateCommitment := state.RootCommitment(vState.TrieNodeStore())
-			if !state.EqualCommitments(calculatedStateCommitment, cspbrT.blocks[i].PreviousL1Commitment().StateCommitment) {
+			if !state.EqualCommitments(calculatedStateCommitment, cdsbrT.blocks[i].PreviousL1Commitment().StateCommitment) {
 				return
 			}
-			err := vState.ApplyBlock(cspbrT.blocks[i])
+			err := vState.ApplyBlock(cdsbrT.blocks[i])
 			if err != nil {
 				return
 			}
 			vState.Commit() // TODO: is it needed
 		}
-		cspbrT.consensusDecidedState.Respond(nil, nil, vState) // TODO: return alias output and state baseline
+		cdsbrT.consensusDecidedState.Respond(nil, nil, vState) // TODO: return alias output and state baseline
 	}
 }

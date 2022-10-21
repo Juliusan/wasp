@@ -28,8 +28,12 @@ func (cspT *ConsensusStateProposal) GetAliasOutputWithID() *isc.AliasOutputWithI
 	return cspT.aliasOutput
 }
 
+func (cspT *ConsensusStateProposal) IsValid() bool {
+	return cspT.context.Err() == nil
+}
+
 func (cspT *ConsensusStateProposal) Respond() {
-	if !cspT.IsResultChClosed() {
+	if cspT.IsValid() && !cspT.IsResultChClosed() {
 		cspT.resultCh <- nil
 		cspT.closeResultCh()
 	}

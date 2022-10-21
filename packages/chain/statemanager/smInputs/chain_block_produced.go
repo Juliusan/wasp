@@ -35,8 +35,12 @@ func (cbpT *ChainBlockProduced) GetBlock() state.Block {
 	return cbpT.block
 }
 
+func (cbpT *ChainBlockProduced) IsValid() bool {
+	return cbpT.context.Err() == nil
+}
+
 func (cbpT *ChainBlockProduced) Respond(err error) {
-	if !cbpT.isResultChClosed() {
+	if cbpT.IsValid() && !cbpT.isResultChClosed() {
 		cbpT.resultCh <- err
 		cbpT.closeResultCh()
 	}
