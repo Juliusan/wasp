@@ -31,13 +31,8 @@ func TestBasic(t *testing.T) {
 	nodeID := smUtils.MakeNodeID(0)
 	_, sm := createStateManagerGpa(t, chainID, nodeID, []gpa.NodeID{nodeID}, log)
 	tc := gpa.NewTestContext(map[gpa.NodeID]gpa.GPA{nodeID: sm})
+	sendBlocksToNode(t, tc, nodeID, stateOutputs, blocks)
 
-	for i := range blocks {
-		cbpInput, cbpRespChan := smInputs.NewChainBlockProduced(context.Background(), stateOutputs[i], blocks[i])
-		t.Logf("Supplying block %s to node %s", blocks[i].GetHash(), nodeID)
-		tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeID: cbpInput}).RunAll()
-		require.NoError(t, requireReceiveNoError(t, cbpRespChan, 5*time.Second))
-	}
 	cspInput, cspRespChan := smInputs.NewConsensusStateProposal(context.Background(), stateOutputs[7])
 	tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeID: cspInput}).RunAll()
 	require.NoError(t, requireReceiveAnything(cspRespChan, 5*time.Second))
@@ -67,31 +62,17 @@ func TestManyNodes(t *testing.T) {
 		sms[nodeID] = sm
 	}
 	tc := gpa.NewTestContext(sms)
+	sendBlocksToNode(t, tc, nodeIDs[0], stateOutputs, blocks)
 
-	for i := range blocks {
-		cbpInput, cbpRespChan := smInputs.NewChainBlockProduced(context.Background(), stateOutputs[i], blocks[i])
-		t.Logf("Supplying block %s to node %s", blocks[i].GetHash(), nodeIDs[0])
-		tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeIDs[0]: cbpInput}).RunAll()
-		require.NoError(t, requireReceiveNoError(t, cbpRespChan, 5*time.Second))
-	}
 	//Nodes are checked sequentially
+	var result bool
 	now := time.Now()
 	for i := 1; i < len(nodeIDs); i++ {
 		cspInput, cspRespChan := smInputs.NewConsensusStateProposal(context.Background(), stateOutputs[7])
 		tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeIDs[i]: cspInput}).RunAll()
-		var j int
-		received := false
-		for j = 0; j < 10 && !received; {
-			t.Logf("Waiting block %s on node %s, iteration %v", blocks[7].GetHash(), nodeIDs[i], j)
-			if requireReceiveAnything(cspRespChan, 0*time.Second) != nil {
-				now = now.Add(200 * time.Millisecond)
-				sendTimerTickToNodes(tc, nodeIDs, now)
-				j++
-			} else {
-				received = true
-			}
-		}
-		require.Less(t, j, 10)
+		t.Logf("Sequential: waiting for blocks ending with %s to be available on node %s...", blocks[7].GetHash(), nodeIDs[i])
+		now, result = requireReceiveAnythingNTimes(t, tc, cspRespChan, 10, nodeIDs, now, 200*time.Millisecond)
+		require.True(t, result)
 		commitment, err := state.L1CommitmentFromBytes(stateOutputs[7].GetAliasOutput().StateMetadata)
 		require.NoError(t, err)
 		cdsInput, cdsRespChan := smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[7].OutputID(), &commitment)
@@ -107,19 +88,9 @@ func TestManyNodes(t *testing.T) {
 	}
 	tc.WithInputs(cspInputs).RunAll()
 	for nodeID, cspRespChan := range cspRespChans {
-		var j int
-		received := false
-		for j = 0; j < 10 && !received; {
-			t.Logf("Waiting block %s on node %s, iteration %v", blocks[15].GetHash(), nodeID, j)
-			if requireReceiveAnything(cspRespChan, 0*time.Second) != nil {
-				now = now.Add(200 * time.Millisecond)
-				sendTimerTickToNodes(tc, nodeIDs, now)
-				j++
-			} else {
-				received = true
-			}
-		}
-		require.Less(t, j, 10)
+		t.Logf("Parallel: waiting for blocks ending with %s to be available on node %s...", blocks[15].GetHash(), nodeID)
+		now, result = requireReceiveAnythingNTimes(t, tc, cspRespChan, 10, nodeIDs, now, 200*time.Millisecond)
+		require.True(t, result)
 	}
 	commitment, err := state.L1CommitmentFromBytes(stateOutputs[15].GetAliasOutput().StateMetadata)
 	require.NoError(t, err)
@@ -131,7 +102,7 @@ func TestManyNodes(t *testing.T) {
 	}
 	tc.WithInputs(cdsInputs).RunAll()
 	for nodeID, cdsRespChan := range cdsRespChans {
-		t.Logf("Waiting block %s on node %s", blocks[15].GetHash(), nodeID)
+		t.Logf("Parallel: waiting for state %s on node %s", commitment, nodeID)
 		require.NoError(t, requireReceiveVState(t, cdsRespChan, 16, stateOutputs[15].OutputID(), &commitment, 5*time.Second))
 	}
 }
@@ -242,10 +213,36 @@ func requireReceiveVState(t *testing.T, respChan <-chan (*consGR.StateMgrDecided
 	}
 }
 
-func sendTimerTickToNodes(tc *gpa.TestContext, nodeIDs []gpa.NodeID, now time.Time) {
+func sendBlocksToNode(t *testing.T, tc *gpa.TestContext, nodeID gpa.NodeID, stateOutputs []*isc.AliasOutputWithID, blocks []state.Block) {
+	for i := range blocks {
+		cbpInput, cbpRespChan := smInputs.NewChainBlockProduced(context.Background(), stateOutputs[i], blocks[i])
+		t.Logf("Supplying block %s to node %s", blocks[i].GetHash(), nodeID)
+		tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeID: cbpInput}).RunAll()
+		require.NoError(t, requireReceiveNoError(t, cbpRespChan, 5*time.Second))
+	}
+}
+
+func sendTimerTickToNodes(t *testing.T, tc *gpa.TestContext, nodeIDs []gpa.NodeID, now time.Time) {
+	t.Logf("Time %v is sent to nodes %v", now, nodeIDs)
 	inputs := make(map[gpa.NodeID]gpa.Input)
 	for i := range nodeIDs {
 		inputs[nodeIDs[i]] = smInputs.NewStateManagerTimerTick(now)
 	}
 	tc.WithInputs(inputs).RunAll()
+}
+
+func requireReceiveAnythingNTimes(
+	t *testing.T, tc *gpa.TestContext, anyChan <-chan (interface{}), n int, //nolint:gocritic
+	nodeIDs []gpa.NodeID, now time.Time, delay time.Duration,
+) (time.Time, bool) {
+	newNow := now
+	for j := 0; j < n; j++ {
+		t.Logf("\t...iteration %v", j)
+		if requireReceiveAnything(anyChan, 0*time.Second) == nil {
+			return newNow, true
+		}
+		newNow = newNow.Add(delay)
+		sendTimerTickToNodes(t, tc, nodeIDs, newNow)
+	}
+	return newNow, false
 }
