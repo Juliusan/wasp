@@ -169,3 +169,7 @@ func (b *blockImpl) GetHash() (ret BlockHash) {
 	copy(ret[:BlockHashSize], r[:BlockHashSize])
 	return
 }
+
+func (b *blockImpl) Equals(other Block) bool {
+	return b.GetHash().Equals(other.GetHash())
+}

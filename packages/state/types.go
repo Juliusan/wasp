@@ -60,6 +60,7 @@ type Block interface {
 	PreviousL1Commitment() *L1Commitment
 	GetHash() BlockHash
 	Bytes() []byte
+	Equals(Block) bool
 }
 
 type OnBlockSaveClosure func(stateCommitment trie.VCommitment, block Block)

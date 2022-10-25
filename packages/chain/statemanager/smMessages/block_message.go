@@ -1,6 +1,8 @@
 package smMessages
 
 import (
+	"fmt"
+
 	"github.com/iotaledger/wasp/packages/gpa"
 	"github.com/iotaledger/wasp/packages/state"
 )
@@ -20,15 +22,18 @@ func NewBlockMessage(block state.Block, to gpa.NodeID) *BlockMessage {
 }
 
 func NewBlockMessageFromBytes(data []byte) (*BlockMessage, error) {
-	block, err := state.BlockFromBytes(data)
+	if data[0] != MsgTypeBlockMessage {
+		return nil, fmt.Errorf("Error creating block message from bytes: wrong message type %v", data[0])
+	}
+	block, err := state.BlockFromBytes(data[1:])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Error creating block message from bytes: %v", err)
 	}
 	return NewBlockMessage(block, "UNKNOWN"), nil
 }
 
 func (bmT *BlockMessage) MarshalBinary() (data []byte, err error) {
-	return bmT.block.Bytes(), nil
+	return append([]byte{MsgTypeBlockMessage}, bmT.block.Bytes()...), nil
 }
 
 func (bmT *BlockMessage) GetBlock() state.Block {

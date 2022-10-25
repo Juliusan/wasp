@@ -8,6 +8,7 @@
 package smGPA
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/iotaledger/hive.go/core/kvstore"
@@ -103,7 +104,17 @@ func (smT *stateManagerGPA) StatusString() string {
 }
 
 func (smT *stateManagerGPA) UnmarshalMessage(data []byte) (gpa.Message, error) {
-	return nil, nil
+	if len(data) < 1 {
+		return nil, fmt.Errorf("Error unmarshalling message: slice of length %v is too short", data)
+	}
+	switch data[0] {
+	case smMessages.MsgTypeBlockMessage:
+		return smMessages.NewBlockMessageFromBytes(data)
+	case smMessages.MsgTypeGetBlockMessage:
+		return smMessages.NewGetBlockMessageFromBytes(data)
+	default:
+		return nil, fmt.Errorf("Error unmarshalling message: message type %v unknown", data[0])
+	}
 }
 
 // -------------------------------------
