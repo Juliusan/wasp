@@ -30,13 +30,13 @@ func (cspbrT *consensusStateProposalBlockRequest) getLastBlockHash() state.Block
 }
 
 func (cspbrT *consensusStateProposalBlockRequest) isValid() bool {
-	return cspbrT.consensusStateProposal.IsValid()
+	return !cspbrT.done && cspbrT.consensusStateProposal.IsValid()
 }
 
 func (cspbrT *consensusStateProposalBlockRequest) blockAvailable(block state.Block) {}
 
 func (cspbrT *consensusStateProposalBlockRequest) markCompleted() {
-	if !cspbrT.done {
+	if cspbrT.isValid() {
 		cspbrT.done = true
 		cspbrT.consensusStateProposal.Respond()
 	}
