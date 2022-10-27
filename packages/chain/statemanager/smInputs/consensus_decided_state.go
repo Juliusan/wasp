@@ -6,7 +6,6 @@ import (
 	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/gr"
 	"github.com/iotaledger/wasp/packages/gpa"
-	"github.com/iotaledger/wasp/packages/isc"
 	"github.com/iotaledger/wasp/packages/isc/coreutil"
 	"github.com/iotaledger/wasp/packages/state"
 )
@@ -42,11 +41,11 @@ func (cdsT *ConsensusDecidedState) IsValid() bool {
 	return cdsT.context.Err() == nil
 }
 
-func (cdsT *ConsensusDecidedState) Respond(aliasOutput *isc.AliasOutputWithID, stateBaseline coreutil.StateBaseline, virtualStateAccess state.VirtualStateAccess) {
+func (cdsT *ConsensusDecidedState) Respond(virtualStateAccess state.VirtualStateAccess) {
 	if cdsT.IsValid() && !cdsT.IsResultChClosed() {
 		cdsT.resultCh <- &consGR.StateMgrDecidedState{
-			AliasOutput:        aliasOutput,
-			StateBaseline:      stateBaseline,
+			AliasOutput:        nil,                                                                                                 // TODO: Should be removed from the structure
+			StateBaseline:      coreutil.NewChainStateSync().SetSolidIndex(virtualStateAccess.BlockIndex()).GetSolidIndexBaseline(), // TODO - move it to
 			VirtualStateAccess: virtualStateAccess,
 		}
 		cdsT.closeResultCh()
