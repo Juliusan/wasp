@@ -17,7 +17,8 @@ func TestBlockCacheSimple(t *testing.T) {
 	defer log.Sync()
 
 	_, blocks, _ := GetBlocks(t, 4, 1)
-	blockCache := NewBlockCache(NewDefaultTimeProvider(), log)
+	blockCache, err := NewBlockCache(NewDefaultTimeProvider(), NewEmptyBlockWAL(), log)
+	require.NoError(t, err)
 	blockCache.AddBlock(blocks[0])
 	blockCache.AddBlock(blocks[1])
 	blockCache.AddBlock(blocks[2])
@@ -32,7 +33,8 @@ func TestBlockCacheCleaning(t *testing.T) {
 	defer log.Sync()
 
 	_, blocks, _ := GetBlocks(t, 6, 2)
-	blockCache := NewBlockCache(NewDefaultTimeProvider(), log)
+	blockCache, err := NewBlockCache(NewDefaultTimeProvider(), NewEmptyBlockWAL(), log)
+	require.NoError(t, err)
 	beforeTime := time.Now()
 	blockCache.AddBlock(blocks[0])
 	blockCache.AddBlock(blocks[1])
@@ -58,4 +60,23 @@ func TestBlockCacheCleaning(t *testing.T) {
 	require.Nil(t, blockCache.GetBlock(blocks[3].GetHash()))
 	require.NotNil(t, blockCache.GetBlock(blocks[4].GetHash()))
 	require.NotNil(t, blockCache.GetBlock(blocks[5].GetHash()))
+}
+
+// Test if blocks are put/taken from WAL, if they are not available in cache
+func TestBlockCacheWAL(t *testing.T) {
+	log := testlogger.NewLogger(t)
+	defer log.Sync()
+
+	_, blocks, _ := GetBlocks(t, 3, 2)
+	blockCache, err := NewBlockCache(NewDefaultTimeProvider(), NewMockedBlockWAL(), log)
+	require.NoError(t, err)
+	blockCache.AddBlock(blocks[0])
+	blockCache.AddBlock(blocks[1])
+	require.NotNil(t, blockCache.GetBlock(blocks[0].GetHash()))
+	require.NotNil(t, blockCache.GetBlock(blocks[1].GetHash()))
+	require.Nil(t, blockCache.GetBlock(blocks[2].GetHash()))
+	blockCache.CleanOlderThan(time.Now()) // Blocks are cleaned from cache, but should be accessible from WAL
+	require.NotNil(t, blockCache.GetBlock(blocks[0].GetHash()))
+	require.NotNil(t, blockCache.GetBlock(blocks[1].GetHash()))
+	require.Nil(t, blockCache.GetBlock(blocks[2].GetHash()))
 }

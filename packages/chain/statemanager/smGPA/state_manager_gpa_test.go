@@ -121,6 +121,11 @@ func TestBlockCacheCleaningAuto(t *testing.T) {
 	chainID, blocks, _ := smUtils.GetBlocks(t, 6, 2)
 	nodeID := smUtils.MakeNodeID(0)
 	_, sm := createStateManagerGpa(t, chainID, nodeID, []gpa.NodeID{nodeID}, log, smTimers)
+	var err error
+	smImpl := sm.(*stateManagerGPA)
+	// WAL should not be used for this test
+	smImpl.blockCache, err = smUtils.NewBlockCache(smTimers.TimeProvider, smUtils.NewEmptyBlockWAL(), smImpl.log)
+	require.NoError(t, err)
 	tc := gpa.NewTestContext(map[gpa.NodeID]gpa.GPA{nodeID: sm})
 
 	advanceTimeAndTimerTickFun := func(advance time.Duration) {
@@ -177,7 +182,8 @@ func createStateManagerGpa(t *testing.T, chainID *isc.ChainID, me gpa.NodeID, no
 	nr := smUtils.NewNodeRandomiser(me, nodeIDs)
 	store := mapdb.NewMapDB()
 	log = log.Named(me.String()).Named("c-" + chainID.ShortString())
-	sm := New(chainID, nr, store, log, timers...)
+	sm, err := New(chainID, nr, "", store, log, timers...)
+	require.NoError(t, err)
 	return nr, sm
 }
 

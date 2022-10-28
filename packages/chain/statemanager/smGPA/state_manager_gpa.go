@@ -28,6 +28,9 @@ type stateManagerGPA struct {
 	blockCache              *smUtils.BlockCache
 	blockRequests           map[state.BlockHash]([]blockRequest) //nolint:gocritic // removing brackets doesn't make code simpler or clearer
 	nodeRandomiser          *smUtils.NodeRandomiser
+	solidState              state.VirtualStateAccess
+	solidStateOutputSeq     uint32
+	stateOutputSeqLastUsed  uint32
 	timers                  StateManagerTimers
 	lastGetBlocksTime       time.Time
 	lastCleanBlockCacheTime time.Time
@@ -40,25 +43,49 @@ const (
 	numberOfNodesToRequestBlockFromConst = 5
 )
 
-func New(chainID *isc.ChainID, nr *smUtils.NodeRandomiser, store kvstore.KVStore, log *logger.Logger, timersOpt ...StateManagerTimers) gpa.GPA {
-	smLog := log.Named("sm")
+func New(chainID *isc.ChainID, nr *smUtils.NodeRandomiser, walFolder string, store kvstore.KVStore, log *logger.Logger, timersOpt ...StateManagerTimers) (gpa.GPA, error) {
+	var err error
 	var timers StateManagerTimers
+	smLog := log.Named("gpa")
 	if len(timersOpt) > 0 {
 		timers = timersOpt[0]
 	} else {
 		timers = NewStateManagerTimers()
 	}
-	return &stateManagerGPA{
+	var wal smUtils.BlockWAL
+	if walFolder == "" {
+		wal = smUtils.NewMockedBlockWAL()
+	} else {
+		wal, err = smUtils.NewBlockWAL(walFolder, chainID, log)
+		if err != nil {
+			smLog.Debugf("Error creating block WAL: %v", err)
+			return nil, err
+		}
+	}
+	blockCache, err := smUtils.NewBlockCache(timers.TimeProvider, wal, smLog)
+	if err != nil {
+		smLog.Debugf("Error creating block cache: %v", err)
+		return nil, err
+	}
+	result := &stateManagerGPA{
 		log:                     smLog,
 		chainID:                 chainID,
 		store:                   store,
-		blockCache:              smUtils.NewBlockCache(timers.TimeProvider, smLog),
+		blockCache:              blockCache,
 		blockRequests:           make(map[state.BlockHash][]blockRequest),
 		nodeRandomiser:          nr,
+		solidStateOutputSeq:     0,
+		stateOutputSeqLastUsed:  0,
 		timers:                  timers,
 		lastGetBlocksTime:       time.Time{},
 		lastCleanBlockCacheTime: time.Time{},
 	}
+	result.solidState, err = result.createOriginState()
+	if err != nil {
+		result.log.Errorf("Error creating origin state: %v", err)
+		return nil, err
+	}
+	return result, nil
 }
 
 // -------------------------------------
@@ -164,9 +191,26 @@ func (smT *stateManagerGPA) handleGeneralBlock(block state.Block) (gpa.OutMessag
 }
 
 func (smT *stateManagerGPA) handleChainReceiveConfirmedAliasOutput(aliasOutput *isc.AliasOutputWithID) gpa.OutMessages {
-	smT.log.Debugf("Input received: chain confirmed alias output  %s", isc.OID(aliasOutput.ID()))
-	// TODO: aliasOutput!
-	return gpa.NoMessages()
+	aliasOutputID := isc.OID(aliasOutput.ID())
+	smT.log.Debugf("Input received: chain confirmed alias output %s", aliasOutputID)
+	smT.stateOutputSeqLastUsed++
+	seq := smT.stateOutputSeqLastUsed
+	smT.log.Debugf("Alias output %s is %v-th in state manager", aliasOutputID, seq)
+	stateCommitment, err := state.L1CommitmentFromAliasOutput(aliasOutput.GetAliasOutput())
+	if err != nil {
+		smT.log.Errorf("Error retrieving state commitment from alias output %s: %v", aliasOutputID, err)
+		return gpa.NoMessages()
+	}
+	request := newLocalStateBlockRequest(stateCommitment.BlockHash, smT.createOriginState, func(vs state.VirtualStateAccess) {
+		smT.log.Debugf("Virtual state for alias output %s (%v-th in state manager) is ready", aliasOutputID, seq)
+		if seq <= smT.solidStateOutputSeq {
+			smT.log.Warnf("State for output %s (%v-th in state manager) is not needed: it is already overwritten by %v-th output",
+				aliasOutputID, seq, smT.solidStateOutputSeq)
+		}
+		//TODO: store blocks to DB
+		smT.solidState = vs
+	})
+	return smT.traceBlockChainByRequest(request)
 }
 
 func (smT *stateManagerGPA) handleConsensusStateProposal(csp *smInputs.ConsensusStateProposal) gpa.OutMessages {

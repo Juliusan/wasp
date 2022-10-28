@@ -51,15 +51,21 @@ func New(
 	me *cryptolib.PublicKey,
 	peerPubKeys []*cryptolib.PublicKey,
 	net peering.NetworkProvider,
+	walFolder string,
 	store kvstore.KVStore,
 	log *logger.Logger,
-) node.ChainStateMgr { // TODO: consGR.StateMgr {
+) (node.ChainStateMgr, error) { // TODO: consGR.StateMgr {
 	smLog := log.Named("sm")
 	nr := smUtils.NewNodeRandomiserNoInit(pubKeyAsNodeID(me))
+	stateManagerGPA, err := smGPA.New(chainID, nr, walFolder, store, smLog)
+	if err != nil {
+		smLog.Errorf("Failed to create state manager GPA: %v", err)
+		return nil, err
+	}
 	result := &stateManager{
 		log:             smLog,
 		chainID:         chainID,
-		stateManagerGPA: smGPA.New(chainID, nr, store, smLog),
+		stateManagerGPA: stateManagerGPA,
 		nodeRandomiser:  nr,
 		inputPipe:       pipe.NewDefaultInfinitePipe(),
 		messagePipe:     pipe.NewDefaultInfinitePipe(),
@@ -84,7 +90,7 @@ func New(
 	}
 
 	go result.run()
-	return result
+	return result, nil
 }
 
 // -------------------------------------
