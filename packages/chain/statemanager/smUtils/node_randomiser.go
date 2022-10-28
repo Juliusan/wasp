@@ -8,34 +8,32 @@
 package smUtils
 
 import (
-	"sync"
-
+	"github.com/iotaledger/hive.go/core/logger"
 	"github.com/iotaledger/wasp/packages/gpa"
 	"github.com/iotaledger/wasp/packages/util"
 )
 
 type NodeRandomiser struct {
-	//log           *logger.Logger
 	me          gpa.NodeID
 	nodeIDs     []gpa.NodeID
 	permutation *util.Permutation16
-	mutex       sync.RWMutex
+	log         *logger.Logger
 }
 
-func NewNodeRandomiser(me gpa.NodeID, nodeIDs []gpa.NodeID) *NodeRandomiser {
-	result := NewNodeRandomiserNoInit(me)
+func NewNodeRandomiser(me gpa.NodeID, nodeIDs []gpa.NodeID, log *logger.Logger) *NodeRandomiser {
+	result := NewNodeRandomiserNoInit(me, log)
 	result.init(nodeIDs)
 	return result
 }
 
 // Before using the returned NodeRandomiser, it must be initted: UpdateNodeIDs
 // method must be called.
-func NewNodeRandomiserNoInit(me gpa.NodeID) *NodeRandomiser {
+func NewNodeRandomiserNoInit(me gpa.NodeID, log *logger.Logger) *NodeRandomiser {
 	return &NodeRandomiser{
-		//log:           smLog,
 		me:          me,
 		nodeIDs:     nil, // Will be set in result.UpdateNodeIDs([]gpa.NodeID).
 		permutation: nil, // Will be set in result.UpdateNodeIDs([]gpa.NodeID).
+		log:         log.Named("nr"),
 	}
 }
 
@@ -49,16 +47,12 @@ func (nrT *NodeRandomiser) init(allNodeIDs []gpa.NodeID) {
 	var err error
 	nrT.permutation, err = util.NewPermutation16(uint16(len(nrT.nodeIDs)))
 	if err != nil {
-		// TODO
-		//d.log.Warnf("Error generating cryptographically secure random domains permutation: %v", err)
+		nrT.log.Warnf("Failed to generate cryptographically secure random domains permutation; will use insecure one: %v", err)
 		return
 	}
 }
 
 func (nrT *NodeRandomiser) UpdateNodeIDs(nodeIDs []gpa.NodeID) {
-	nrT.mutex.Lock()
-	defer nrT.mutex.Unlock()
-
 	nrT.init(nodeIDs)
 }
 
@@ -67,9 +61,6 @@ func (nrT *NodeRandomiser) IsInitted() bool {
 }
 
 func (nrT *NodeRandomiser) GetRandomOtherNodeIDs(upToNumPeers int) []gpa.NodeID {
-	nrT.mutex.RLock()
-	defer nrT.mutex.RUnlock()
-
 	if upToNumPeers > len(nrT.nodeIDs) {
 		upToNumPeers = len(nrT.nodeIDs)
 	}

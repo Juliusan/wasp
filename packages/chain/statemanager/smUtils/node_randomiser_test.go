@@ -22,7 +22,7 @@ func TestGetRandomOtherNodeIDs(t *testing.T) {
 
 	nodeIDs := MakeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7}) // 7 nodes excluding self
 	me := nodeIDs[meIndex]
-	randomiser := NewNodeRandomiser(me, nodeIDs)
+	randomiser := NewNodeRandomiser(me, nodeIDs, log)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs, me)
 }
 
@@ -36,7 +36,7 @@ func TestGetRandomOtherNodeIDsToFew(t *testing.T) {
 
 	nodeIDs := MakeNodeIDs([]int{0, 1, 2, 3}) // 3 nodes excluding self
 	me := nodeIDs[meIndex]
-	randomiser := NewNodeRandomiser(me, nodeIDs)
+	randomiser := NewNodeRandomiser(me, nodeIDs, log)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, 3, iterationCount, nodeIDs, me)
 }
 
@@ -53,7 +53,7 @@ func TestGetRandomOtherNodeIDsAfterChanges(t *testing.T) {
 	nodeIDs3 := MakeNodeIDs([]int{0, 2, 3, 5, 6, 7})
 	nodeIDs4 := MakeNodeIDs([]int{0, 2, 3, 4, 5, 6, 7, 9})
 	me := nodeIDs0[0]
-	randomiser := NewNodeRandomiser(me, nodeIDs0)
+	randomiser := NewNodeRandomiser(me, nodeIDs0, log)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs0, me)
 	randomiser.UpdateNodeIDs(nodeIDs1)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs1, me)
