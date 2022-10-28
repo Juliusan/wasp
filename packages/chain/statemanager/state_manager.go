@@ -55,7 +55,7 @@ func New(
 	walFolder string,
 	store kvstore.KVStore,
 	log *logger.Logger,
-) (node.ChainStateMgr, error) { // TODO: consGR.StateMgr {
+) (node.ChainStateMgr, error) {
 	smLog := log.Named("sm")
 	nr := smUtils.NewNodeRandomiserNoInit(pubKeyAsNodeID(me), smLog)
 	stateManagerGPA, err := smGPA.New(chainID, nr, walFolder, store, smLog)
@@ -116,7 +116,7 @@ func (smT *stateManager) AccessNodesUpdated(accessNodePubKeys []*cryptolib.Publi
 }
 
 // -------------------------------------
-// Implementations of consGR.StateMgr (TODO: or whatever - for consensus)
+// Implementations of consGR.StateMgr
 // -------------------------------------
 
 // ConsensusStateProposal asks State manager to ensure that all the blocks for aliasOutput are available.

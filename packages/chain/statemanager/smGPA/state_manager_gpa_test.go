@@ -10,7 +10,6 @@ import (
 
 	"github.com/iotaledger/hive.go/core/kvstore/mapdb"
 	"github.com/iotaledger/hive.go/core/logger"
-	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/trie.go/trie"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/gr"
 	"github.com/iotaledger/wasp/packages/chain/statemanager/smInputs"
@@ -40,7 +39,7 @@ func TestBasic(t *testing.T) {
 	require.NoError(t, err)
 	cdsInput, cdsRespChan := smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[7].OutputID(), &commitment)
 	tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeID: cdsInput}).RunAll()
-	require.NoError(t, requireReceiveVState(t, cdsRespChan, 8, stateOutputs[7].OutputID(), &commitment, 5*time.Second))
+	require.NoError(t, requireReceiveVState(t, cdsRespChan, 8, &commitment, 5*time.Second))
 }
 
 // 10 nodes in a network. 8 blocks are sent to state manager of the first node.
@@ -77,7 +76,7 @@ func TestManyNodes(t *testing.T) {
 		require.NoError(t, err)
 		cdsInput, cdsRespChan := smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[7].OutputID(), &commitment)
 		tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeIDs[i]: cdsInput}).RunAll()
-		require.NoError(t, requireReceiveVState(t, cdsRespChan, 8, stateOutputs[7].OutputID(), &commitment, 5*time.Second))
+		require.NoError(t, requireReceiveVState(t, cdsRespChan, 8, &commitment, 5*time.Second))
 	}
 	//Nodes are checked in parallel
 	cspInputs := make(map[gpa.NodeID]gpa.Input)
@@ -103,7 +102,7 @@ func TestManyNodes(t *testing.T) {
 	tc.WithInputs(cdsInputs).RunAll()
 	for nodeID, cdsRespChan := range cdsRespChans {
 		t.Logf("Parallel: waiting for state %s on node %s", commitment, nodeID)
-		require.NoError(t, requireReceiveVState(t, cdsRespChan, 16, stateOutputs[15].OutputID(), &commitment, 5*time.Second))
+		require.NoError(t, requireReceiveVState(t, cdsRespChan, 16, &commitment, 5*time.Second))
 	}
 }
 
@@ -206,12 +205,11 @@ func requireReceiveAnything(anyChan <-chan (interface{}), timeout time.Duration)
 	}
 }
 
-func requireReceiveVState(t *testing.T, respChan <-chan (*consGR.StateMgrDecidedState), index uint32, aliasOutputID iotago.OutputID, l1c *state.L1Commitment, timeout time.Duration) error { //nolint:gocritic
+func requireReceiveVState(t *testing.T, respChan <-chan (*consGR.StateMgrDecidedState), index uint32, l1c *state.L1Commitment, timeout time.Duration) error { //nolint:gocritic
 	select {
 	case smds := <-respChan:
 		require.Equal(t, smds.VirtualStateAccess.BlockIndex(), index)
-		//require.Equal(t, smds.AliasOutput.GetStateIndex(), index)   // TODO
-		//require.Equal(t, smds.AliasOutput.OutputID(), aliasOutputID) // TODO
+		require.True(t, smds.StateBaseline.IsValid())
 		require.True(t, state.EqualCommitments(trie.RootCommitment(smds.VirtualStateAccess.TrieNodeStore()), l1c.StateCommitment))
 		return nil
 	case <-time.After(timeout):

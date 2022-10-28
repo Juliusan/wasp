@@ -29,6 +29,7 @@ type stateManagerGPA struct {
 	blockRequests           map[state.BlockHash]([]blockRequest) //nolint:gocritic // removing brackets doesn't make code simpler or clearer
 	nodeRandomiser          smUtils.NodeRandomiser
 	solidState              state.VirtualStateAccess
+	solidStateBlockHash     state.BlockHash
 	solidStateOutputSeq     uint32
 	stateOutputSeqLastUsed  uint32
 	timers                  StateManagerTimers
@@ -75,6 +76,7 @@ func New(chainID *isc.ChainID, nr smUtils.NodeRandomiser, walFolder string, stor
 		blockRequests:           make(map[state.BlockHash][]blockRequest),
 		nodeRandomiser:          nr,
 		solidStateOutputSeq:     0,
+		solidStateBlockHash:     state.OriginBlockHash(),
 		stateOutputSeqLastUsed:  0,
 		timers:                  timers,
 		lastGetBlocksTime:       time.Time{},
@@ -170,7 +172,6 @@ func (smT *stateManagerGPA) handlePeerBlock(from gpa.NodeID, block state.Block) 
 func (smT *stateManagerGPA) handleChainBlockProduced(input *smInputs.ChainBlockProduced) gpa.OutMessages {
 	smT.log.Debugf("Input received: chain block produced: block %s, alias output %s",
 		input.GetBlock().GetHash(), isc.OID(input.GetAliasOutputWithID().ID()))
-	// TODO: aliasOutput!
 	messages, err := smT.handleGeneralBlock(input.GetBlock())
 	input.Respond(err)
 	return messages
@@ -209,6 +210,7 @@ func (smT *stateManagerGPA) handleChainReceiveConfirmedAliasOutput(aliasOutput *
 		}
 		//TODO: store blocks to DB
 		smT.solidState = vs
+		smT.solidStateBlockHash = stateCommitment.BlockHash
 	})
 	return smT.traceBlockChainByRequest(request)
 }

@@ -1,5 +1,3 @@
-// TODO: WAL
-
 package smUtils
 
 import (

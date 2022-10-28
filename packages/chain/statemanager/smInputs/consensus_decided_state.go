@@ -45,7 +45,7 @@ func (cdsT *ConsensusDecidedState) Respond(virtualStateAccess state.VirtualState
 	if cdsT.IsValid() && !cdsT.IsResultChClosed() {
 		cdsT.resultCh <- &consGR.StateMgrDecidedState{
 			AliasOutput:        nil,                                                                                                 // TODO: Should be removed from the structure
-			StateBaseline:      coreutil.NewChainStateSync().SetSolidIndex(virtualStateAccess.BlockIndex()).GetSolidIndexBaseline(), // TODO - move it to
+			StateBaseline:      coreutil.NewChainStateSync().SetSolidIndex(virtualStateAccess.BlockIndex()).GetSolidIndexBaseline(), // TODO - move it to Respond method parameters?
 			VirtualStateAccess: virtualStateAccess,
 		}
 		cdsT.closeResultCh()
