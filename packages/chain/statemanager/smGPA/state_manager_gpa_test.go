@@ -178,10 +178,10 @@ func TestBlockCacheCleaningAuto(t *testing.T) {
 	require.Nil(t, blockCache.GetBlock(blocks[4].GetHash()))
 }
 
-func createStateManagerGpa(t *testing.T, chainID *isc.ChainID, me gpa.NodeID, nodeIDs []gpa.NodeID, log *logger.Logger, timers ...StateManagerTimers) (*smUtils.NodeRandomiser, gpa.GPA) {
-	nr := smUtils.NewNodeRandomiser(me, nodeIDs)
-	store := mapdb.NewMapDB()
+func createStateManagerGpa(t *testing.T, chainID *isc.ChainID, me gpa.NodeID, nodeIDs []gpa.NodeID, log *logger.Logger, timers ...StateManagerTimers) (smUtils.NodeRandomiser, gpa.GPA) {
 	log = log.Named(me.String()).Named("c-" + chainID.ShortString())
+	nr := smUtils.NewNodeRandomiser(me, nodeIDs, log)
+	store := mapdb.NewMapDB()
 	sm, err := New(chainID, nr, "", store, log, timers...)
 	require.NoError(t, err)
 	return nr, sm

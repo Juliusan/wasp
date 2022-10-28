@@ -14,7 +14,7 @@ type blockTime struct {
 	blockHash state.BlockHash
 }
 
-type BlockCache struct {
+type blockCache struct {
 	log          *logger.Logger
 	blocks       map[state.BlockHash]state.Block
 	wal          BlockWAL
@@ -22,8 +22,10 @@ type BlockCache struct {
 	timeProvider TimeProvider
 }
 
-func NewBlockCache(tp TimeProvider, wal BlockWAL, log *logger.Logger) (*BlockCache, error) {
-	return &BlockCache{
+var _ BlockCache = &blockCache{}
+
+func NewBlockCache(tp TimeProvider, wal BlockWAL, log *logger.Logger) (BlockCache, error) {
+	return &blockCache{
 		log:          log.Named("bc"),
 		blocks:       make(map[state.BlockHash]state.Block),
 		wal:          wal,
@@ -32,7 +34,7 @@ func NewBlockCache(tp TimeProvider, wal BlockWAL, log *logger.Logger) (*BlockCac
 	}, nil
 }
 
-func (bcT *BlockCache) AddBlock(block state.Block) error {
+func (bcT *blockCache) AddBlock(block state.Block) error {
 	blockHash := block.GetHash()
 	err := bcT.wal.Write(block)
 	if err != nil {
@@ -44,7 +46,7 @@ func (bcT *BlockCache) AddBlock(block state.Block) error {
 	return nil
 }
 
-func (bcT *BlockCache) addBlockToCache(blockHash state.BlockHash, block state.Block) {
+func (bcT *blockCache) addBlockToCache(blockHash state.BlockHash, block state.Block) {
 	bcT.blocks[blockHash] = block
 	bcT.times = append(bcT.times, &blockTime{
 		time:      bcT.timeProvider.GetNow(),
@@ -53,7 +55,7 @@ func (bcT *BlockCache) addBlockToCache(blockHash state.BlockHash, block state.Bl
 	bcT.log.Debugf("Block %v added to cache", blockHash)
 }
 
-func (bcT *BlockCache) GetBlock(blockHash state.BlockHash) state.Block {
+func (bcT *blockCache) GetBlock(blockHash state.BlockHash) state.Block {
 	block, ok := bcT.blocks[blockHash]
 
 	if ok {
@@ -77,7 +79,7 @@ func (bcT *BlockCache) GetBlock(blockHash state.BlockHash) state.Block {
 	return nil
 }
 
-func (bcT *BlockCache) CleanOlderThan(limit time.Time) {
+func (bcT *blockCache) CleanOlderThan(limit time.Time) {
 	for i, bt := range bcT.times {
 		if bt.time.After(limit) {
 			bcT.times = bcT.times[i:]

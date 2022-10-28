@@ -65,7 +65,7 @@ func TestGetRandomOtherNodeIDsAfterChanges(t *testing.T) {
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs4, me)
 }
 
-func testGetRandomOtherNodeIDs(t *testing.T, randomiser *NodeRandomiser, nodeIDsToGet, nodeIDsGot, iterationCount int, nodeIDs []gpa.NodeID, me gpa.NodeID) {
+func testGetRandomOtherNodeIDs(t *testing.T, randomiser NodeRandomiser, nodeIDsToGet, nodeIDsGot, iterationCount int, nodeIDs []gpa.NodeID, me gpa.NodeID) {
 	nodeIDFounds := make(map[gpa.NodeID]bool)
 	for i := 0; i < iterationCount; i++ {
 		t.Logf("Iteration %v...", i)

@@ -25,7 +25,7 @@ type stateManager struct {
 	log             *logger.Logger
 	chainID         *isc.ChainID
 	stateManagerGPA gpa.GPA
-	nodeRandomiser  *smUtils.NodeRandomiser
+	nodeRandomiser  smUtils.NodeRandomiser
 	nodeIDToPubKey  map[gpa.NodeID]*cryptolib.PublicKey
 	inputPipe       pipe.Pipe
 	messagePipe     pipe.Pipe

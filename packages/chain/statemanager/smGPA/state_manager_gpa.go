@@ -25,9 +25,9 @@ type stateManagerGPA struct {
 	log                     *logger.Logger
 	chainID                 *isc.ChainID
 	store                   kvstore.KVStore
-	blockCache              *smUtils.BlockCache
+	blockCache              smUtils.BlockCache
 	blockRequests           map[state.BlockHash]([]blockRequest) //nolint:gocritic // removing brackets doesn't make code simpler or clearer
-	nodeRandomiser          *smUtils.NodeRandomiser
+	nodeRandomiser          smUtils.NodeRandomiser
 	solidState              state.VirtualStateAccess
 	solidStateOutputSeq     uint32
 	stateOutputSeqLastUsed  uint32
@@ -43,7 +43,7 @@ const (
 	numberOfNodesToRequestBlockFromConst = 5
 )
 
-func New(chainID *isc.ChainID, nr *smUtils.NodeRandomiser, walFolder string, store kvstore.KVStore, log *logger.Logger, timersOpt ...StateManagerTimers) (gpa.GPA, error) {
+func New(chainID *isc.ChainID, nr smUtils.NodeRandomiser, walFolder string, store kvstore.KVStore, log *logger.Logger, timersOpt ...StateManagerTimers) (gpa.GPA, error) {
 	var err error
 	var timers StateManagerTimers
 	smLog := log.Named("gpa")
