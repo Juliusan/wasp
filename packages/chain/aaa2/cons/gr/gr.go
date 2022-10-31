@@ -68,7 +68,7 @@ type StateMgr interface {
 	ConsensusProducedBlock(
 		ctx context.Context,
 		block state.Block,
-	) <-chan interface{}
+	) <-chan error
 }
 
 type VM interface {
@@ -112,7 +112,7 @@ type ConsGr struct {
 	stateMgrStateProposalAsked  bool
 	stateMgrDecidedStateRespCh  <-chan *StateMgrDecidedState
 	stateMgrDecidedStateAsked   bool
-	stateMgrSaveBlockRespCh     <-chan interface{}
+	stateMgrSaveBlockRespCh     <-chan error
 	stateMgrSaveBlockAsked      bool
 	vm                          VM
 	vmRespCh                    <-chan *vm.VMTask
