@@ -30,14 +30,14 @@ func TestBasic(t *testing.T) {
 	nodeID := smUtils.MakeNodeID(0)
 	_, sm := createStateManagerGpa(t, chainID, nodeID, []gpa.NodeID{nodeID}, log)
 	tc := gpa.NewTestContext(map[gpa.NodeID]gpa.GPA{nodeID: sm})
-	sendBlocksToNode(t, tc, nodeID, stateOutputs, blocks)
+	sendBlocksToNode(t, tc, nodeID, blocks)
 
 	cspInput, cspRespChan := smInputs.NewConsensusStateProposal(context.Background(), stateOutputs[7])
 	tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeID: cspInput}).RunAll()
 	require.NoError(t, requireReceiveAnything(cspRespChan, 5*time.Second))
 	commitment, err := state.L1CommitmentFromBytes(stateOutputs[7].GetAliasOutput().StateMetadata)
 	require.NoError(t, err)
-	cdsInput, cdsRespChan := smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[7].OutputID(), &commitment)
+	cdsInput, cdsRespChan := smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[7])
 	tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeID: cdsInput}).RunAll()
 	require.NoError(t, requireReceiveVState(t, cdsRespChan, 8, &commitment, 5*time.Second))
 }
@@ -61,7 +61,7 @@ func TestManyNodes(t *testing.T) {
 		sms[nodeID] = sm
 	}
 	tc := gpa.NewTestContext(sms)
-	sendBlocksToNode(t, tc, nodeIDs[0], stateOutputs, blocks)
+	sendBlocksToNode(t, tc, nodeIDs[0], blocks)
 
 	//Nodes are checked sequentially
 	var result bool
@@ -74,7 +74,7 @@ func TestManyNodes(t *testing.T) {
 		require.True(t, result)
 		commitment, err := state.L1CommitmentFromBytes(stateOutputs[7].GetAliasOutput().StateMetadata)
 		require.NoError(t, err)
-		cdsInput, cdsRespChan := smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[7].OutputID(), &commitment)
+		cdsInput, cdsRespChan := smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[7])
 		tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeIDs[i]: cdsInput}).RunAll()
 		require.NoError(t, requireReceiveVState(t, cdsRespChan, 8, &commitment, 5*time.Second))
 	}
@@ -97,7 +97,7 @@ func TestManyNodes(t *testing.T) {
 	cdsRespChans := make(map[gpa.NodeID]<-chan *consGR.StateMgrDecidedState)
 	for i := 1; i < len(nodeIDs); i++ {
 		nodeID := nodeIDs[i]
-		cdsInputs[nodeID], cdsRespChans[nodeID] = smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[15].OutputID(), &commitment)
+		cdsInputs[nodeID], cdsRespChans[nodeID] = smInputs.NewConsensusDecidedState(context.Background(), stateOutputs[15])
 	}
 	tc.WithInputs(cdsInputs).RunAll()
 	for nodeID, cdsRespChan := range cdsRespChans {
@@ -217,9 +217,9 @@ func requireReceiveVState(t *testing.T, respChan <-chan (*consGR.StateMgrDecided
 	}
 }
 
-func sendBlocksToNode(t *testing.T, tc *gpa.TestContext, nodeID gpa.NodeID, stateOutputs []*isc.AliasOutputWithID, blocks []state.Block) {
+func sendBlocksToNode(t *testing.T, tc *gpa.TestContext, nodeID gpa.NodeID, blocks []state.Block) {
 	for i := range blocks {
-		cbpInput, cbpRespChan := smInputs.NewChainBlockProduced(context.Background(), stateOutputs[i], blocks[i])
+		cbpInput, cbpRespChan := smInputs.NewChainBlockProduced(context.Background(), blocks[i])
 		t.Logf("Supplying block %s to node %s", blocks[i].GetHash(), nodeID)
 		tc.WithInputs(map[gpa.NodeID]gpa.Input{nodeID: cbpInput}).RunAll()
 		require.NoError(t, requireReceiveNoError(t, cbpRespChan, 5*time.Second))

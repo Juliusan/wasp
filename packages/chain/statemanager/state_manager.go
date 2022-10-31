@@ -6,7 +6,6 @@ import (
 
 	"github.com/iotaledger/hive.go/core/kvstore"
 	"github.com/iotaledger/hive.go/core/logger"
-	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/gr"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/node"
 	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA"
@@ -99,12 +98,6 @@ func New(
 // Implementations of node.ChainStateMgr
 // -------------------------------------
 
-func (smT *stateManager) BlockProduced(ctx context.Context, aliasOutput *isc.AliasOutputWithID, block state.Block) <-chan error {
-	input, resultCh := smInputs.NewChainBlockProduced(ctx, aliasOutput, block)
-	smT.addInput(input)
-	return resultCh
-}
-
 func (smT *stateManager) ReceiveConfirmedAliasOutput(aliasOutput *isc.AliasOutputWithID) {
 	smT.addInput(smInputs.NewChainReceiveConfirmedAliasOutput(aliasOutput))
 }
@@ -128,8 +121,14 @@ func (smT *stateManager) ConsensusStateProposal(ctx context.Context, aliasOutput
 }
 
 // ConsensusDecidedState asks State manager to return a virtual state vith stateCommitment as its state commitment
-func (smT *stateManager) ConsensusDecidedState(ctx context.Context, aliasOutputID iotago.OutputID, stateCommitment *state.L1Commitment) <-chan *consGR.StateMgrDecidedState {
-	input, resultCh := smInputs.NewConsensusDecidedState(ctx, aliasOutputID, stateCommitment)
+func (smT *stateManager) ConsensusDecidedState(ctx context.Context, aliasOutput *isc.AliasOutputWithID) <-chan *consGR.StateMgrDecidedState {
+	input, resultCh := smInputs.NewConsensusDecidedState(ctx, aliasOutput)
+	smT.addInput(input)
+	return resultCh
+}
+
+func (smT *stateManager) ConsensusProducedBlock(ctx context.Context, block state.Block) <-chan error {
+	input, resultCh := smInputs.NewChainBlockProduced(ctx, block)
 	smT.addInput(input)
 	return resultCh
 }

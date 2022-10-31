@@ -170,8 +170,7 @@ func (smT *stateManagerGPA) handlePeerBlock(from gpa.NodeID, block state.Block) 
 }
 
 func (smT *stateManagerGPA) handleChainBlockProduced(input *smInputs.ChainBlockProduced) gpa.OutMessages {
-	smT.log.Debugf("Input received: chain block produced: block %s, alias output %s",
-		input.GetBlock().GetHash(), isc.OID(input.GetAliasOutputWithID().ID()))
+	smT.log.Debugf("Input received: chain block produced: %s", input.GetBlock().GetHash())
 	messages, err := smT.handleGeneralBlock(input.GetBlock())
 	input.Respond(err)
 	return messages
@@ -238,8 +237,7 @@ func (smT *stateManagerGPA) handleConsensusStateProposal(csp *smInputs.Consensus
 }
 
 func (smT *stateManagerGPA) handleConsensusDecidedState(cds *smInputs.ConsensusDecidedState) gpa.OutMessages {
-	smT.log.Debugf("Input received: consensus request for decided state for output %s and commitment %s",
-		isc.OID(cds.GetAliasOutputID().UTXOInput()), cds.GetStateCommitment())
+	smT.log.Debugf("Input received: consensus request for decided state for commitment %s", cds.GetStateCommitment())
 	return smT.traceBlockChainByRequest(newConsensusDecidedStateBlockRequest(cds))
 }
 

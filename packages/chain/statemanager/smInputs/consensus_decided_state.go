@@ -3,34 +3,32 @@ package smInputs
 import (
 	"context"
 
-	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/gr"
 	"github.com/iotaledger/wasp/packages/gpa"
+	"github.com/iotaledger/wasp/packages/isc"
 	"github.com/iotaledger/wasp/packages/isc/coreutil"
 	"github.com/iotaledger/wasp/packages/state"
 )
 
 type ConsensusDecidedState struct {
 	context         context.Context
-	aliasOutputID   iotago.OutputID
 	stateCommitment *state.L1Commitment
 	resultCh        chan<- *consGR.StateMgrDecidedState
 }
 
 var _ gpa.Input = &ConsensusDecidedState{}
 
-func NewConsensusDecidedState(ctx context.Context, aliasOutputID iotago.OutputID, sc *state.L1Commitment) (*ConsensusDecidedState, <-chan *consGR.StateMgrDecidedState) {
+func NewConsensusDecidedState(ctx context.Context, aliasOutput *isc.AliasOutputWithID) (*ConsensusDecidedState, <-chan *consGR.StateMgrDecidedState) {
+	sc, err := state.L1CommitmentFromAliasOutput(aliasOutput.GetAliasOutput())
+	if err != nil {
+		panic("Cannot make L1 commitment from alias output")
+	}
 	resultChannel := make(chan *consGR.StateMgrDecidedState, 1)
 	return &ConsensusDecidedState{
 		context:         ctx,
-		aliasOutputID:   aliasOutputID,
 		stateCommitment: sc,
 		resultCh:        resultChannel,
 	}, resultChannel
-}
-
-func (cdsT *ConsensusDecidedState) GetAliasOutputID() iotago.OutputID {
-	return cdsT.aliasOutputID
 }
 
 func (cdsT *ConsensusDecidedState) GetStateCommitment() *state.L1Commitment {
@@ -44,7 +42,6 @@ func (cdsT *ConsensusDecidedState) IsValid() bool {
 func (cdsT *ConsensusDecidedState) Respond(virtualStateAccess state.VirtualStateAccess) {
 	if cdsT.IsValid() && !cdsT.IsResultChClosed() {
 		cdsT.resultCh <- &consGR.StateMgrDecidedState{
-			AliasOutput:        nil,                                                                                                 // TODO: Should be removed from the structure
 			StateBaseline:      coreutil.NewChainStateSync().SetSolidIndex(virtualStateAccess.BlockIndex()).GetSolidIndexBaseline(), // TODO - move it to Respond method parameters?
 			VirtualStateAccess: virtualStateAccess,
 		}
