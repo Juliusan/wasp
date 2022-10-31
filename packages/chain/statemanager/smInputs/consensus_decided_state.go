@@ -12,6 +12,7 @@ import (
 
 type ConsensusDecidedState struct {
 	context         context.Context
+	blockIndex      uint32 // TODO: temporar field.  Remove it after DB refactoring.
 	stateCommitment *state.L1Commitment
 	resultCh        chan<- *consGR.StateMgrDecidedState
 }
@@ -26,9 +27,14 @@ func NewConsensusDecidedState(ctx context.Context, aliasOutput *isc.AliasOutputW
 	resultChannel := make(chan *consGR.StateMgrDecidedState, 1)
 	return &ConsensusDecidedState{
 		context:         ctx,
+		blockIndex:      aliasOutput.GetStateIndex(),
 		stateCommitment: sc,
 		resultCh:        resultChannel,
 	}, resultChannel
+}
+
+func (cdsT *ConsensusDecidedState) GetBlockIndex() uint32 { // TODO: temporar function.  Remove it after DB refactoring.
+	return cdsT.blockIndex
 }
 
 func (cdsT *ConsensusDecidedState) GetStateCommitment() *state.L1Commitment {

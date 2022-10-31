@@ -10,6 +10,7 @@ const topPriority = uint32(0)
 
 type blockRequest interface {
 	getLastBlockHash() state.BlockHash
+	getLastBlockIndex() uint32 // TODO: temporar function.  Remove it after DB refactoring.
 	blockAvailable(state.Block)
 	isValid() bool
 	getPriority() uint32

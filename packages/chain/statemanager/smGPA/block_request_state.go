@@ -12,7 +12,7 @@ type stateBlockRequest struct { // Abstract struct for requests to obtain certai
 
 type stateBlockRequestImplementation interface { // Abstract methods of struct stateBlockRequest
 	isImplementationValid() bool
-	respond(state.VirtualStateAccess)
+	respond([]state.Block, state.VirtualStateAccess) // TODO: blocks parameter should probably be removed after DB refactoring
 }
 
 var _ blockRequest = &stateBlockRequest{}
@@ -26,6 +26,10 @@ func newStateBlockRequest(sbri stateBlockRequestImplementation) *stateBlockReque
 }
 
 func (sbrT *stateBlockRequest) getLastBlockHash() state.BlockHash {
+	panic("Abstract method, should be overridden")
+}
+
+func (sbrT *stateBlockRequest) getLastBlockIndex() uint32 { // TODO: temporar function. Remove it after DB refactoring.
 	panic("Abstract method, should be overridden")
 }
 
@@ -68,6 +72,6 @@ func (sbrT *stateBlockRequest) markCompleted(createBaseStateFun createStateFun) 
 			}
 			vState.Commit() // TODO: is it needed
 		}
-		sbrT.implementation.respond(vState)
+		sbrT.implementation.respond(sbrT.blocks, vState)
 	}
 }

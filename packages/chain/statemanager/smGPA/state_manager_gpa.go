@@ -27,6 +27,7 @@ type stateManagerGPA struct {
 	store                   kvstore.KVStore
 	blockCache              smUtils.BlockCache
 	blockRequests           map[state.BlockHash]([]blockRequest) //nolint:gocritic // removing brackets doesn't make code simpler or clearer
+	blockIndexes            map[state.BlockHash]uint32           // TODO: temporar field. Remove it after DB refactoring.
 	nodeRandomiser          smUtils.NodeRandomiser
 	solidState              state.VirtualStateAccess
 	solidStateBlockHash     state.BlockHash
@@ -63,7 +64,7 @@ func New(chainID *isc.ChainID, nr smUtils.NodeRandomiser, walFolder string, stor
 			return nil, err
 		}
 	}
-	blockCache, err := smUtils.NewBlockCache(timers.TimeProvider, wal, smLog)
+	blockCache, err := smUtils.NewBlockCache(store, timers.TimeProvider, wal, smLog)
 	if err != nil {
 		smLog.Debugf("Error creating block cache: %v", err)
 		return nil, err
@@ -74,18 +75,38 @@ func New(chainID *isc.ChainID, nr smUtils.NodeRandomiser, walFolder string, stor
 		store:                   store,
 		blockCache:              blockCache,
 		blockRequests:           make(map[state.BlockHash][]blockRequest),
+		blockIndexes:            make(map[state.BlockHash]uint32),
 		nodeRandomiser:          nr,
 		solidStateOutputSeq:     0,
-		solidStateBlockHash:     state.OriginBlockHash(),
 		stateOutputSeqLastUsed:  0,
 		timers:                  timers,
 		lastGetBlocksTime:       time.Time{},
 		lastCleanBlockCacheTime: time.Time{},
 	}
-	result.solidState, err = result.createOriginState()
+
+	solidState, stateExists, err := state.LoadSolidState(result.store, result.chainID)
 	if err != nil {
-		result.log.Errorf("Error creating origin state: %v", err)
+		result.log.Errorf("Failed loading the solid state: %v", err)
 		return nil, err
+	}
+	if stateExists {
+		block, err := solidState.ExtractBlock()
+		if err != nil {
+			result.log.Errorf("Failed extracting the block out of loaded state: %v", err)
+			return nil, err
+		}
+		result.solidState = solidState
+		result.solidStateBlockHash = block.GetHash()
+		result.log.Infof("SOLID STATE has been loaded. Block index: #%d, State commitment: %s",
+			result.solidState.BlockIndex(), state.RootCommitment(result.solidState.TrieNodeStore()))
+	} else {
+		result.solidState, err = result.createOriginState()
+		result.solidStateBlockHash = state.OriginBlockHash()
+		if err != nil {
+			result.log.Errorf("Failed to create origin state: %v", err)
+			return nil, err
+		}
+		result.log.Infof("ORIGIN STATE has been created")
 	}
 	return result, nil
 }
@@ -115,7 +136,7 @@ func (smT *stateManagerGPA) Input(input gpa.Input) gpa.OutMessages {
 func (smT *stateManagerGPA) Message(msg gpa.Message) gpa.OutMessages {
 	switch msgCasted := msg.(type) {
 	case *smMessages.GetBlockMessage:
-		return smT.handlePeerGetBlock(msgCasted.GetSender(), msgCasted.GetBlockHash())
+		return smT.handlePeerGetBlock(msgCasted.GetSender(), msgCasted.GetBlockIndex(), msgCasted.GetBlockHash())
 	case *smMessages.BlockMessage:
 		return smT.handlePeerBlock(msgCasted.GetSender(), msgCasted.GetBlock())
 	default:
@@ -150,9 +171,10 @@ func (smT *stateManagerGPA) UnmarshalMessage(data []byte) (gpa.Message, error) {
 // Internal functions
 // -------------------------------------
 
-func (smT *stateManagerGPA) handlePeerGetBlock(from gpa.NodeID, blockHash state.BlockHash) gpa.OutMessages {
+// TODO: `blockIndex` is a temporar parameter.  Remove it after DB refactoring.
+func (smT *stateManagerGPA) handlePeerGetBlock(from gpa.NodeID, blockIndex uint32, blockHash state.BlockHash) gpa.OutMessages {
 	smT.log.Debugf("Message received from peer %s: request to get block %s", from, blockHash)
-	block := smT.blockCache.GetBlock(blockHash)
+	block := smT.blockCache.GetBlock(blockIndex, blockHash)
 	if block == nil {
 		return gpa.NoMessages()
 	}
@@ -187,6 +209,7 @@ func (smT *stateManagerGPA) handleGeneralBlock(block state.Block) (gpa.OutMessag
 		return gpa.NoMessages(), nil
 	}
 	delete(smT.blockRequests, blockHash)
+	delete(smT.blockIndexes, blockHash)
 	return smT.traceBlockChain(block, requests...), nil
 }
 
@@ -201,14 +224,19 @@ func (smT *stateManagerGPA) handleChainReceiveConfirmedAliasOutput(aliasOutput *
 		smT.log.Errorf("Error retrieving state commitment from alias output %s: %v", aliasOutputID, err)
 		return gpa.NoMessages()
 	}
-	request := newLocalStateBlockRequest(stateCommitment.BlockHash, seq, func(vs state.VirtualStateAccess) {
+	request := newLocalStateBlockRequest(aliasOutput.GetStateIndex(), stateCommitment.BlockHash, seq, func(blocks []state.Block, vs state.VirtualStateAccess) {
 		smT.log.Debugf("Virtual state for alias output %s (%v-th in state manager) is ready", aliasOutputID, seq)
 		if seq <= smT.solidStateOutputSeq {
 			smT.log.Warnf("State for output %s (%v-th in state manager) is not needed: it is already overwritten by %v-th output",
 				aliasOutputID, seq, smT.solidStateOutputSeq)
 			return
 		}
-		//TODO: store blocks to DB
+
+		err := vs.Save(blocks...) // TODO: blocks probably should be committed in block cache
+		if err != nil {
+			smT.log.Errorf("Error saving virtual state into the DB: %v", err)
+			return
+		}
 		smT.solidState = vs
 		smT.solidStateBlockHash = stateCommitment.BlockHash
 		// NOTE: A situation in which a request is waiting for block, which is
@@ -246,11 +274,12 @@ func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...block
 		request.blockAvailable(block)
 	}
 	nextBlockHash := block.PreviousL1Commitment().BlockHash
+	nextBlockIndex := block.BlockIndex() - 1
 	currentBlock := block
 	for !nextBlockHash.Equals(smT.solidStateBlockHash) && !nextBlockHash.Equals(state.OriginBlockHash()) {
 		smT.log.Debugf("Tracing the chain of blocks: %s is not the first one, looking for its parent %s", currentBlock.GetHash(), nextBlockHash)
 		var response gpa.OutMessages
-		currentBlock, response = smT.getBlockOrRequestMessages(nextBlockHash, requests...)
+		currentBlock, response = smT.getBlockOrRequestMessages(nextBlockIndex, nextBlockHash, requests...)
 		if currentBlock == nil {
 			return response
 		}
@@ -258,6 +287,7 @@ func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...block
 			request.blockAvailable(currentBlock)
 		}
 		nextBlockHash = currentBlock.PreviousL1Commitment().BlockHash
+		nextBlockIndex--
 	}
 	var stateType string
 	var createBaseStateFun createStateFun
@@ -314,38 +344,41 @@ func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...block
 func (smT *stateManagerGPA) traceBlockChainByRequest(request blockRequest) gpa.OutMessages {
 	lastBlockHash := request.getLastBlockHash()
 	smT.log.Debugf("Tracing the chain of blocks ending with block %s", lastBlockHash)
-	block, response := smT.getBlockOrRequestMessages(lastBlockHash, request)
+	block, response := smT.getBlockOrRequestMessages(request.getLastBlockIndex(), lastBlockHash, request)
 	if block == nil {
 		return response
 	}
 	return smT.traceBlockChain(block, request)
 }
 
-func (smT *stateManagerGPA) getBlockOrRequestMessages(blockHash state.BlockHash, requests ...blockRequest) (state.Block, gpa.OutMessages) {
-	block := smT.blockCache.GetBlock(blockHash)
+// TODO: `blockIndex` is a temporar parameter. Remove it after DB refactoring.
+func (smT *stateManagerGPA) getBlockOrRequestMessages(blockIndex uint32, blockHash state.BlockHash, requests ...blockRequest) (state.Block, gpa.OutMessages) {
+	block := smT.blockCache.GetBlock(blockIndex, blockHash)
 	if block == nil {
 		// Mark that the requests are waiting for `blockHash` block
 		currrentRequests, ok := smT.blockRequests[blockHash]
 		if !ok {
 			smT.log.Debugf("Block %s is missing, it is the first request waiting for it", blockHash)
 			smT.blockRequests[blockHash] = requests
+			smT.blockIndexes[blockHash] = blockIndex
 		} else {
 			smT.log.Debugf("Block %s is missing, %v requests are waiting for it in addition to this one", len(currrentRequests))
 			smT.blockRequests[blockHash] = append(currrentRequests, requests...)
 		}
-		return nil, smT.makeGetBlockRequestMessages(blockHash)
+		return nil, smT.makeGetBlockRequestMessages(blockIndex, blockHash)
 	}
 	smT.log.Debugf("Block %s is available", blockHash)
 	return block, nil // Second parameter should not be used then
 }
 
 // Make `numberOfNodesToRequestBlockFromConst` messages to random peers
-func (smT *stateManagerGPA) makeGetBlockRequestMessages(blockHash state.BlockHash) gpa.OutMessages {
+// TODO: `blockIndex` is a temporar parameter. Remove it after DB refactoring.
+func (smT *stateManagerGPA) makeGetBlockRequestMessages(blockIndex uint32, blockHash state.BlockHash) gpa.OutMessages {
 	nodeIDs := smT.nodeRandomiser.GetRandomOtherNodeIDs(numberOfNodesToRequestBlockFromConst)
 	smT.log.Debugf("Requesting block %s from %v random nodes %v", blockHash, numberOfNodesToRequestBlockFromConst, nodeIDs)
 	response := gpa.NoMessages()
 	for _, nodeID := range nodeIDs {
-		response.Add(smMessages.NewGetBlockMessage(blockHash, nodeID))
+		response.Add(smMessages.NewGetBlockMessage(blockIndex, blockHash, nodeID))
 	}
 	return response
 }
@@ -356,7 +389,11 @@ func (smT *stateManagerGPA) handleStateManagerTimerTick(now time.Time) gpa.OutMe
 	if now.After(smT.lastGetBlocksTime.Add(smT.timers.StateManagerGetBlockRetry)) {
 		smT.log.Debugf("Timer tick: resending get block messages...")
 		for blockHash, _ := range smT.blockRequests { //nolint:gofumpt,gofmt,revive,gosimple
-			result.AddAll(smT.makeGetBlockRequestMessages(blockHash))
+			blockIndex, ok := smT.blockIndexes[blockHash]
+			if !ok {
+				smT.log.Panicf("Temporar situation: index of block %s is unknown", blockHash)
+			}
+			result.AddAll(smT.makeGetBlockRequestMessages(blockIndex, blockHash))
 		}
 		smT.lastGetBlocksTime = now
 	}
@@ -368,6 +405,7 @@ func (smT *stateManagerGPA) handleStateManagerTimerTick(now time.Time) gpa.OutMe
 	if now.After(smT.lastCleanRequestsTime.Add(smT.timers.StateManagerRequestCleaningPeriod)) {
 		smT.log.Debugf("Timer tick: cleaning requests...")
 		newBlockRequestsMap := make(map[state.BlockHash]([]blockRequest)) //nolint:gocritic
+		newBlockIndexesMap := make(map[state.BlockHash]uint32)
 		for blockHash, blockRequests := range smT.blockRequests {
 			outI := 0
 			for _, blockRequest := range blockRequests {
@@ -382,9 +420,15 @@ func (smT *stateManagerGPA) handleStateManagerTimerTick(now time.Time) gpa.OutMe
 			blockRequests = blockRequests[:outI]
 			if len(blockRequests) > 0 {
 				newBlockRequestsMap[blockHash] = blockRequests
+				blockIndex, ok := smT.blockIndexes[blockHash]
+				if !ok {
+					smT.log.Panicf("Temporar situation: index of block %s is unknown", blockHash)
+				}
+				newBlockIndexesMap[blockHash] = blockIndex
 			}
 		}
 		smT.blockRequests = newBlockRequestsMap
+		smT.blockIndexes = newBlockIndexesMap
 		smT.lastCleanRequestsTime = now
 	}
 	smT.log.Debugf("Timer tick %v handled", now)

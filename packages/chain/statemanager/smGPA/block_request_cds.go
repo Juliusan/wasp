@@ -27,6 +27,10 @@ func (cdsbrT *consensusDecidedStateBlockRequest) getLastBlockHash() state.BlockH
 	return cdsbrT.consensusDecidedState.GetStateCommitment().BlockHash
 }
 
+func (cdsbrT *consensusDecidedStateBlockRequest) getLastBlockIndex() uint32 { // TODO: temporar function.  Remove it after DB refactoring.
+	return cdsbrT.consensusDecidedState.GetBlockIndex()
+}
+
 func (cdsbrT *consensusDecidedStateBlockRequest) isImplementationValid() bool {
 	return cdsbrT.consensusDecidedState.IsValid()
 }
@@ -35,6 +39,7 @@ func (cdsbrT *consensusDecidedStateBlockRequest) getPriority() uint32 {
 	return topPriority
 }
 
-func (cdsbrT *consensusDecidedStateBlockRequest) respond(vState state.VirtualStateAccess) {
+// TODO: first parameter should probably be removed after DB refactoring
+func (cdsbrT *consensusDecidedStateBlockRequest) respond(_ []state.Block, vState state.VirtualStateAccess) {
 	cdsbrT.consensusDecidedState.Respond(vState)
 }

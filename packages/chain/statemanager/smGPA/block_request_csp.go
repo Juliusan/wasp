@@ -29,6 +29,10 @@ func (cspbrT *consensusStateProposalBlockRequest) getLastBlockHash() state.Block
 	return cspbrT.lastBlockHash
 }
 
+func (cspbrT *consensusStateProposalBlockRequest) getLastBlockIndex() uint32 { // TODO: temporar function.  Remove it after DB refactoring.
+	return cspbrT.consensusStateProposal.GetAliasOutputWithID().GetStateIndex()
+}
+
 func (cspbrT *consensusStateProposalBlockRequest) isValid() bool {
 	return !cspbrT.done && cspbrT.consensusStateProposal.IsValid()
 }

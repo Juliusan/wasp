@@ -9,7 +9,7 @@ import (
 
 type BlockCache interface {
 	AddBlock(state.Block) error
-	GetBlock(state.BlockHash) state.Block
+	GetBlock(uint32, state.BlockHash) state.Block // TODO: first parameter is temporar. Remove it after DB is refactored.
 	CleanOlderThan(time.Time)
 }
 
