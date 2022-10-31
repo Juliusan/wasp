@@ -36,6 +36,10 @@ func (sbrT *stateBlockRequest) isValid() bool {
 	return sbrT.implementation.isImplementationValid()
 }
 
+func (sbrT *stateBlockRequest) getPriority() uint32 {
+	panic("Abstract method, should be overridden")
+}
+
 func (sbrT *stateBlockRequest) blockAvailable(block state.Block) {
 	sbrT.blocks = append(sbrT.blocks, block)
 }
@@ -46,6 +50,10 @@ func (sbrT *stateBlockRequest) markCompleted(createBaseStateFun createStateFun) 
 		baseState, err := createBaseStateFun()
 		if err != nil {
 			// Something failed in creating the base state. Just forget the request.
+			return
+		}
+		if baseState == nil {
+			// No need to respond. Just do nothing.
 			return
 		}
 		vState := baseState

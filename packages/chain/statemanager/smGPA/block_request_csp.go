@@ -35,6 +35,10 @@ func (cspbrT *consensusStateProposalBlockRequest) isValid() bool {
 
 func (cspbrT *consensusStateProposalBlockRequest) blockAvailable(block state.Block) {}
 
+func (cspbrT *consensusStateProposalBlockRequest) getPriority() uint32 {
+	return topPriority
+}
+
 func (cspbrT *consensusStateProposalBlockRequest) markCompleted(createStateFun) {
 	if cspbrT.isValid() {
 		cspbrT.done = true

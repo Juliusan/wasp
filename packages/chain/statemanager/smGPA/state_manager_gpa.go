@@ -202,15 +202,27 @@ func (smT *stateManagerGPA) handleChainReceiveConfirmedAliasOutput(aliasOutput *
 		smT.log.Errorf("Error retrieving state commitment from alias output %s: %v", aliasOutputID, err)
 		return gpa.NoMessages()
 	}
-	request := newLocalStateBlockRequest(stateCommitment.BlockHash, func(vs state.VirtualStateAccess) {
+	request := newLocalStateBlockRequest(stateCommitment.BlockHash, seq, func(vs state.VirtualStateAccess) {
 		smT.log.Debugf("Virtual state for alias output %s (%v-th in state manager) is ready", aliasOutputID, seq)
 		if seq <= smT.solidStateOutputSeq {
 			smT.log.Warnf("State for output %s (%v-th in state manager) is not needed: it is already overwritten by %v-th output",
 				aliasOutputID, seq, smT.solidStateOutputSeq)
+			return
 		}
 		//TODO: store blocks to DB
 		smT.solidState = vs
 		smT.solidStateBlockHash = stateCommitment.BlockHash
+		// NOTE: A situation in which a request is waiting for block, which is
+		// between the old solid state and the new one, should not be possible:
+		// While the blocks for new solid state are being collected to handle this
+		// `localStateBlockRequest`, all of them are guaranteed to be in the WAL
+		// at least. Thus if some request is already waiting for the block when
+		// it arrives for this `localStateBlockRequest`, both requests are handled
+		// and no longer wait for this block. Otherwise, if a request for the block
+		// arrives after this `localStateBlockRequest` obtains it, it is retrieved
+		// from the WAL and the request is handled imediatelly without a need to
+		// wait for input from other nodes.
+		// If such sittuation appears possible after all, it should be handled here.
 	})
 	return smT.traceBlockChainByRequest(request)
 }
@@ -265,8 +277,38 @@ func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...block
 		createBaseStateFun = smT.createOriginState
 	}
 	smT.log.Debugf("Tracing the chain of blocks: the chain is complete, marking all the requests as completed based on %s state", stateType)
+	// Competing all the top priority requests (the ones that do not chagne the
+	// state of manager state) and the one with the largest priority among the others.
+	// Other requests are just marked as completed without any call to respond function.
+	// The idea is that all the consensus requests must be completed and only
+	// a single request which was created after receiving alias output from L1:
+	// the one for the newest alias output. Moreover, consensus requests must be
+	// processed before the alias output one to use the old solid state, which is
+	// modified by alias output request.
+	maxPriority := uint32(0)
+	delayedRequests := make([]blockRequest, 0)
 	for _, request := range requests {
-		request.markCompleted(createBaseStateFun)
+		priority := request.getPriority()
+		if priority == topPriority {
+			request.markCompleted(createBaseStateFun)
+		} else {
+			if maxPriority == 0 {
+				maxPriority = priority
+				delayedRequests = append(delayedRequests, request)
+			} else if priority > maxPriority {
+				maxPriority = priority
+				delayedRequests = append(delayedRequests, delayedRequests[0])
+				delayedRequests[0] = request
+			} else {
+				delayedRequests = append(delayedRequests, request)
+			}
+		}
+	}
+	if len(delayedRequests) > 0 {
+		delayedRequests[0].markCompleted(createBaseStateFun)
+		for _, request := range delayedRequests[1:] {
+			request.markCompleted(func() (state.VirtualStateAccess, error) { return nil, nil })
+		}
 	}
 	return gpa.NoMessages()
 }

@@ -31,6 +31,10 @@ func (cdsbrT *consensusDecidedStateBlockRequest) isImplementationValid() bool {
 	return cdsbrT.consensusDecidedState.IsValid()
 }
 
+func (cdsbrT *consensusDecidedStateBlockRequest) getPriority() uint32 {
+	return topPriority
+}
+
 func (cdsbrT *consensusDecidedStateBlockRequest) respond(vState state.VirtualStateAccess) {
 	cdsbrT.consensusDecidedState.Respond(vState)
 }
