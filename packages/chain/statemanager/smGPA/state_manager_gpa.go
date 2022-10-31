@@ -237,7 +237,7 @@ func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...block
 	}
 	nextBlockHash := block.PreviousL1Commitment().BlockHash
 	currentBlock := block
-	for !nextBlockHash.Equals(state.OriginBlockHash()) {
+	for !nextBlockHash.Equals(smT.solidStateBlockHash) && !nextBlockHash.Equals(state.OriginBlockHash()) {
 		smT.log.Debugf("Tracing the chain of blocks: %s is not the first one, looking for its parent %s", currentBlock.GetHash(), nextBlockHash)
 		var response gpa.OutMessages
 		currentBlock, response = smT.getBlockOrRequestMessages(nextBlockHash, requests...)
@@ -249,14 +249,24 @@ func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...block
 		}
 		nextBlockHash = currentBlock.PreviousL1Commitment().BlockHash
 	}
-	smT.log.Debugf("Tracing the chain of blocks: the chain is complete, marking all the requests as completed")
-	for _, request := range requests {
-		originState, err := smT.createOriginState()
-		if err != nil {
-			smT.log.Errorf("Failed to create origin state: %v", err)
-			originState = nil
+	var stateType string
+	var createBaseStateFun createStateFun
+	if !nextBlockHash.Equals(state.OriginBlockHash()) {
+		stateType = "solid"
+		createBaseStateFun = func() (state.VirtualStateAccess, error) {
+			// NOTE: an assumption is that `createBaseStateFun` is called in
+			// the same function call as it is created in. This is needed in order
+			// for `smT.solidState` to be exactly the same as it was during
+			// the creation of this fun.
+			return smT.solidState.Copy(), nil
 		}
-		request.markCompleted(originState)
+	} else {
+		stateType = "origin"
+		createBaseStateFun = smT.createOriginState
+	}
+	smT.log.Debugf("Tracing the chain of blocks: the chain is complete, marking all the requests as completed based on %s state", stateType)
+	for _, request := range requests {
+		request.markCompleted(createBaseStateFun)
 	}
 	return gpa.NoMessages()
 }

@@ -40,11 +40,12 @@ func (sbrT *stateBlockRequest) blockAvailable(block state.Block) {
 	sbrT.blocks = append(sbrT.blocks, block)
 }
 
-func (sbrT *stateBlockRequest) markCompleted(baseState state.VirtualStateAccess) {
+func (sbrT *stateBlockRequest) markCompleted(createBaseStateFun createStateFun) {
 	if sbrT.isValid() {
 		sbrT.done = true
-		if baseState == nil {
-			// Something failed in collecting the state. Just forget the request.
+		baseState, err := createBaseStateFun()
+		if err != nil {
+			// Something failed in creating the base state. Just forget the request.
 			return
 		}
 		vState := baseState

@@ -35,7 +35,7 @@ func (cspbrT *consensusStateProposalBlockRequest) isValid() bool {
 
 func (cspbrT *consensusStateProposalBlockRequest) blockAvailable(block state.Block) {}
 
-func (cspbrT *consensusStateProposalBlockRequest) markCompleted(state.VirtualStateAccess) {
+func (cspbrT *consensusStateProposalBlockRequest) markCompleted(createStateFun) {
 	if cspbrT.isValid() {
 		cspbrT.done = true
 		cspbrT.consensusStateProposal.Respond()
