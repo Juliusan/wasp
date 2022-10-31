@@ -15,11 +15,11 @@ var (
 	_ stateBlockRequestImplementation = &consensusDecidedStateBlockRequest{} // Implements abstract methods of stateBlockRequest
 )
 
-func newConsensusDecidedStateBlockRequest(input *smInputs.ConsensusDecidedState, createOriginStateFun createOriginStateFun) blockRequest {
+func newConsensusDecidedStateBlockRequest(input *smInputs.ConsensusDecidedState) blockRequest {
 	result := &consensusDecidedStateBlockRequest{
 		consensusDecidedState: input,
 	}
-	result.stateBlockRequest = newStateBlockRequest(result, createOriginStateFun)
+	result.stateBlockRequest = newStateBlockRequest(result)
 	return result
 }
 

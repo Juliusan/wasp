@@ -4,13 +4,10 @@ import (
 	"github.com/iotaledger/wasp/packages/state"
 )
 
-type createOriginStateFun func() (state.VirtualStateAccess, error)
-
 type stateBlockRequest struct { // Abstract struct for requests to obtain certain virtual state;
-	implementation       stateBlockRequestImplementation
-	done                 bool
-	blocks               []state.Block
-	createOriginStateFun createOriginStateFun
+	implementation stateBlockRequestImplementation
+	done           bool
+	blocks         []state.Block
 }
 
 type stateBlockRequestImplementation interface { // Abstract methods of struct stateBlockRequest
@@ -20,12 +17,11 @@ type stateBlockRequestImplementation interface { // Abstract methods of struct s
 
 var _ blockRequest = &stateBlockRequest{}
 
-func newStateBlockRequest(sbri stateBlockRequestImplementation, createOriginStateFun createOriginStateFun) *stateBlockRequest {
+func newStateBlockRequest(sbri stateBlockRequestImplementation) *stateBlockRequest {
 	return &stateBlockRequest{
-		implementation:       sbri,
-		done:                 false,
-		blocks:               make([]state.Block, 0),
-		createOriginStateFun: createOriginStateFun,
+		implementation: sbri,
+		done:           false,
+		blocks:         make([]state.Block, 0),
 	}
 }
 
@@ -44,13 +40,14 @@ func (sbrT *stateBlockRequest) blockAvailable(block state.Block) {
 	sbrT.blocks = append(sbrT.blocks, block)
 }
 
-func (sbrT *stateBlockRequest) markCompleted() {
+func (sbrT *stateBlockRequest) markCompleted(baseState state.VirtualStateAccess) {
 	if sbrT.isValid() {
-		vState, err := sbrT.createOriginStateFun()
 		sbrT.done = true
-		if err != nil {
+		if baseState == nil {
+			// Something failed in collecting the state. Just forget the request.
 			return
 		}
+		vState := baseState
 		for i := len(sbrT.blocks) - 1; i >= 0; i-- {
 			calculatedStateCommitment := state.RootCommitment(vState.TrieNodeStore())
 			if !state.EqualCommitments(calculatedStateCommitment, sbrT.blocks[i].PreviousL1Commitment().StateCommitment) {

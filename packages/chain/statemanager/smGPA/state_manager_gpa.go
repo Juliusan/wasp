@@ -202,7 +202,7 @@ func (smT *stateManagerGPA) handleChainReceiveConfirmedAliasOutput(aliasOutput *
 		smT.log.Errorf("Error retrieving state commitment from alias output %s: %v", aliasOutputID, err)
 		return gpa.NoMessages()
 	}
-	request := newLocalStateBlockRequest(stateCommitment.BlockHash, smT.createOriginState, func(vs state.VirtualStateAccess) {
+	request := newLocalStateBlockRequest(stateCommitment.BlockHash, func(vs state.VirtualStateAccess) {
 		smT.log.Debugf("Virtual state for alias output %s (%v-th in state manager) is ready", aliasOutputID, seq)
 		if seq <= smT.solidStateOutputSeq {
 			smT.log.Warnf("State for output %s (%v-th in state manager) is not needed: it is already overwritten by %v-th output",
@@ -228,7 +228,7 @@ func (smT *stateManagerGPA) handleConsensusStateProposal(csp *smInputs.Consensus
 func (smT *stateManagerGPA) handleConsensusDecidedState(cds *smInputs.ConsensusDecidedState) gpa.OutMessages {
 	smT.log.Debugf("Input received: consensus request for decided state for output %s and commitment %s",
 		isc.OID(cds.GetAliasOutputID().UTXOInput()), cds.GetStateCommitment())
-	return smT.traceBlockChainByRequest(newConsensusDecidedStateBlockRequest(cds, smT.createOriginState))
+	return smT.traceBlockChainByRequest(newConsensusDecidedStateBlockRequest(cds))
 }
 
 func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...blockRequest) gpa.OutMessages {
@@ -251,7 +251,12 @@ func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...block
 	}
 	smT.log.Debugf("Tracing the chain of blocks: the chain is complete, marking all the requests as completed")
 	for _, request := range requests {
-		request.markCompleted()
+		originState, err := smT.createOriginState()
+		if err != nil {
+			smT.log.Errorf("Failed to create origin state: %v", err)
+			originState = nil
+		}
+		request.markCompleted(originState)
 	}
 	return gpa.NoMessages()
 }

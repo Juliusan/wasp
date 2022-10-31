@@ -17,12 +17,12 @@ var (
 	_ stateBlockRequestImplementation = &localStateBlockRequest{} // Implements abstract methods of stateBlockRequest
 )
 
-func newLocalStateBlockRequest(bh state.BlockHash, createOriginStateFun createOriginStateFun, respondFun handleVStateFun) blockRequest {
+func newLocalStateBlockRequest(bh state.BlockHash, respondFun handleVStateFun) blockRequest {
 	result := &localStateBlockRequest{
 		lastBlockHash: bh,
 		respondFun:    respondFun,
 	}
-	result.stateBlockRequest = newStateBlockRequest(result, createOriginStateFun)
+	result.stateBlockRequest = newStateBlockRequest(result)
 	return result
 }
 
