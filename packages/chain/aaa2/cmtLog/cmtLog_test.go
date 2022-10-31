@@ -14,10 +14,13 @@ import (
 	"github.com/iotaledger/wasp/packages/cryptolib"
 	"github.com/iotaledger/wasp/packages/gpa"
 	"github.com/iotaledger/wasp/packages/isc"
+	"github.com/iotaledger/wasp/packages/testutil"
 	"github.com/iotaledger/wasp/packages/testutil/testiotago"
 	"github.com/iotaledger/wasp/packages/testutil/testlogger"
 	"github.com/iotaledger/wasp/packages/testutil/testpeers"
 )
+
+// TODO: Test should involve suspend/resume.
 
 func TestBasic(t *testing.T) {
 	type test struct {
@@ -56,7 +59,7 @@ func testBasic(t *testing.T, n, f int) {
 	for i := range gpaNodeIDs {
 		dkShare, err := committeeKeyShares[i].LoadDKShare(committeeAddress)
 		require.NoError(t, err)
-		store := makeMockedCmtLogStore() // Empty store in this case.
+		store := testutil.NewMockedCmtLogStore() // Empty store in this case.
 		cmtLogInst, err := cmtLog.New(gpaNodeIDs[i], chainID, dkShare, store, pubKeyAsNodeID, log)
 		require.NoError(t, err)
 		gpaNodes[gpaNodeIDs[i]] = cmtLogInst.AsGPA()
@@ -66,7 +69,7 @@ func testBasic(t *testing.T, n, f int) {
 	// Start the algorithms.
 	gpaInputs := map[gpa.NodeID]gpa.Input{}
 	for i := range gpaNodeIDs {
-		gpaInputs[gpaNodeIDs[i]] = nil
+		gpaInputs[gpaNodeIDs[i]] = cmtLog.NewInputStart()
 	}
 	gpaTC.WithInputs(gpaInputs)
 	gpaTC.WithInputs(gpaInputs).RunAll()
@@ -74,7 +77,7 @@ func testBasic(t *testing.T, n, f int) {
 	//
 	// Provide first alias output. Consensus should be sent now.
 	ao1 := randomAliasOutputWithID(aliasID, governor.Address(), committeeAddress)
-	gpaTC.WithMessages(sendMsgAliasOutputConfirmed(gpaNodes, ao1)).RunAll()
+	gpaTC.WithInputs(inputAliasOutputConfirmed(gpaNodes, ao1)).RunAll()
 	gpaTC.PrintAllStatusStrings("After AO1Recv", t.Logf)
 	cons1 := gpaNodes[gpaNodeIDs[0]].Output().(*cmtLog.Output)
 	for _, n := range gpaNodes {
@@ -84,18 +87,18 @@ func testBasic(t *testing.T, n, f int) {
 	//
 	// Consensus results received (consumed ao1, produced ao2).
 	ao2 := randomAliasOutputWithID(aliasID, governor.Address(), committeeAddress)
-	gpaTC.WithMessages(sendMsgConsensusOutput(gpaNodes, cons1, ao2)).RunAll()
+	gpaTC.WithInputs(inputConsensusOutput(gpaNodes, cons1, ao2)).RunAll()
 	gpaTC.PrintAllStatusStrings("After gpaMsgsAO2Cons", t.Logf)
 	cons2 := gpaNodes[gpaNodeIDs[0]].Output().(*cmtLog.Output)
 	require.Equal(t, cons2.GetLogIndex(), cons1.GetLogIndex().Next())
-	require.Equal(t, cons2.GetBaseAliasOutputID(), ao2.OutputID())
+	require.Equal(t, cons2.GetBaseAliasOutput(), ao2)
 	for _, n := range gpaNodes {
 		require.NotNil(t, n.Output())
 		require.Equal(t, cons2, n.Output())
 	}
 	//
 	// AO Confirmed received (nothing changes, we are ahead of it)
-	gpaTC.WithMessages(sendMsgAliasOutputConfirmed(gpaNodes, ao2)).RunAll()
+	gpaTC.WithInputs(inputAliasOutputConfirmed(gpaNodes, ao2)).RunAll()
 	gpaTC.PrintAllStatusStrings("After gpaMsgsAO2Recv", t.Logf)
 	for _, n := range gpaNodes {
 		require.NotNil(t, n.Output())
@@ -108,20 +111,20 @@ func testBasic(t *testing.T, n, f int) {
 ////////////////////////////////////////////////////////////////////////////////
 // Helper functions.
 
-func sendMsgAliasOutputConfirmed(gpaNodes map[gpa.NodeID]gpa.GPA, ao *isc.AliasOutputWithID) []gpa.Message {
-	msgs := []gpa.Message{}
+func inputAliasOutputConfirmed(gpaNodes map[gpa.NodeID]gpa.GPA, ao *isc.AliasOutputWithID) map[gpa.NodeID]gpa.Input {
+	inputs := map[gpa.NodeID]gpa.Input{}
 	for n := range gpaNodes {
-		msgs = append(msgs, cmtLog.NewMsgAliasOutputConfirmed(n, ao))
+		inputs[n] = cmtLog.NewInputAliasOutputConfirmed(ao)
 	}
-	return msgs
+	return inputs
 }
 
-func sendMsgConsensusOutput(gpaNodes map[gpa.NodeID]gpa.GPA, consReq *cmtLog.Output, nextAO *isc.AliasOutputWithID) []gpa.Message {
-	msgs := []gpa.Message{}
+func inputConsensusOutput(gpaNodes map[gpa.NodeID]gpa.GPA, consReq *cmtLog.Output, nextAO *isc.AliasOutputWithID) map[gpa.NodeID]gpa.Input {
+	inputs := map[gpa.NodeID]gpa.Input{}
 	for n := range gpaNodes {
-		msgs = append(msgs, cmtLog.NewMsgConsensusOutput(n, consReq.GetLogIndex(), consReq.GetBaseAliasOutputID(), nextAO))
+		inputs[n] = cmtLog.NewInputConsensusOutputDone(consReq.GetLogIndex(), consReq.GetBaseAliasOutput().OutputID(), nextAO)
 	}
-	return msgs
+	return inputs
 }
 
 func randomAliasOutputWithID(aliasID iotago.AliasID, governorAddress, stateAddress iotago.Address) *isc.AliasOutputWithID {
@@ -146,30 +149,4 @@ func pubKeysAsNodeIDs(pubKeys []*cryptolib.PublicKey) []gpa.NodeID {
 
 func pubKeyAsNodeID(pubKey *cryptolib.PublicKey) gpa.NodeID {
 	return gpa.NodeID(pubKey.String())
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// mockedCmtLogStore
-
-// TODO: Move it to testutils?
-type mockedCmtLogStore struct {
-	data map[string]*cmtLog.State
-}
-
-var _ cmtLog.Store = &mockedCmtLogStore{}
-
-func makeMockedCmtLogStore() cmtLog.Store {
-	return &mockedCmtLogStore{data: map[string]*cmtLog.State{}}
-}
-
-func (s *mockedCmtLogStore) LoadCmtLogState(cmtAddr iotago.Address) (*cmtLog.State, error) {
-	if store, ok := s.data[cmtAddr.Key()]; ok {
-		return store, nil
-	}
-	return nil, cmtLog.ErrCmtLogStateNotFound
-}
-
-func (s *mockedCmtLogStore) SaveCmtLogState(cmtAddr iotago.Address, state *cmtLog.State) error {
-	s.data[cmtAddr.Key()] = state
-	return nil
 }

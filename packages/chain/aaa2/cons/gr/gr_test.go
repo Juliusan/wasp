@@ -16,8 +16,8 @@ import (
 	"github.com/iotaledger/hive.go/core/logger"
 	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/contracts/native/inccounter"
+	"github.com/iotaledger/wasp/packages/chain/aaa2/cmtLog"
 	consGR "github.com/iotaledger/wasp/packages/chain/aaa2/cons/gr"
-	"github.com/iotaledger/wasp/packages/chain/consensus/journal"
 	"github.com/iotaledger/wasp/packages/cryptolib"
 	"github.com/iotaledger/wasp/packages/hashing"
 	"github.com/iotaledger/wasp/packages/isc"
@@ -107,8 +107,7 @@ func testGeneric(t *testing.T, n, f int, reliable bool) {
 	originAO, chainID := tcl.MakeTxChainOrigin(cmtAddress)
 	chainInitReqs := tcl.MakeTxChainInit()
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	require.NoError(t, err)
-	logIndex := journal.LogIndex(0)
+	logIndex := cmtLog.LogIndex(0)
 	for i := range peerIdentities {
 		procCache := processors.MustNew(procConfig)
 		dkShare, err := dkShareProviders[i].LoadDKShare(cmtAddress)
@@ -276,7 +275,6 @@ func (tsm *testStateMgr) addState(aliasOutput *isc.AliasOutputWithID, stateBasel
 	defer tsm.lock.Unlock()
 	hash := commitmentHashFromAO(aliasOutput)
 	tsm.states[hash] = &consGR.StateMgrDecidedState{
-		AliasOutput:        aliasOutput,
 		StateBaseline:      stateBaseline,
 		VirtualStateAccess: virtualStateAccess,
 	}
@@ -295,13 +293,26 @@ func (tsm *testStateMgr) ConsensusStateProposal(ctx context.Context, aliasOutput
 
 // State manager has to ensure all the data needed for the specified alias
 // output (presented as aliasOutputID+stateCommitment) is present in the DB.
-func (tsm *testStateMgr) ConsensusDecidedState(ctx context.Context, aliasOutputID iotago.OutputID, stateCommitment *state.L1Commitment) <-chan *consGR.StateMgrDecidedState {
+func (tsm *testStateMgr) ConsensusDecidedState(ctx context.Context, aliasOutput *isc.AliasOutputWithID) <-chan *consGR.StateMgrDecidedState {
 	tsm.lock.Lock()
 	defer tsm.lock.Unlock()
 	resp := make(chan *consGR.StateMgrDecidedState, 1)
+	stateCommitment, err := state.L1CommitmentFromAliasOutput(aliasOutput.GetAliasOutput())
+	if err != nil {
+		panic(err)
+	}
 	hash := commitmentHash(stateCommitment)
 	tsm.qDecided[hash] = resp
 	tsm.tryRespond(hash)
+	return resp
+}
+
+func (tsm *testStateMgr) ConsensusProducedBlock(ctx context.Context, block state.Block) <-chan interface{} {
+	tsm.lock.Lock()
+	defer tsm.lock.Unlock()
+	resp := make(chan interface{}, 1)
+	resp <- nil // We don't save it in the test for now, just respond it is already saved.
+	close(resp)
 	return resp
 }
 

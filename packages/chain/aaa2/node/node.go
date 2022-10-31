@@ -25,13 +25,12 @@ import (
 	"github.com/iotaledger/hive.go/core/logger"
 	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/chainMgr"
+	"github.com/iotaledger/wasp/packages/chain/aaa2/cmtLog"
 	consGR "github.com/iotaledger/wasp/packages/chain/aaa2/cons/gr"
-	"github.com/iotaledger/wasp/packages/chain/consensus/journal"
 	"github.com/iotaledger/wasp/packages/cryptolib"
 	"github.com/iotaledger/wasp/packages/gpa"
 	"github.com/iotaledger/wasp/packages/isc"
 	"github.com/iotaledger/wasp/packages/peering"
-	"github.com/iotaledger/wasp/packages/state"
 	"github.com/iotaledger/wasp/packages/util/pipe"
 	"github.com/iotaledger/wasp/packages/vm/processors"
 )
@@ -45,6 +44,7 @@ const (
 
 type ChainNode interface {
 	// TODO: All the public administrative functions.
+	// HeadStateAnchor (confirmed + unconfirmed).
 	// GetCurrentCommittee.
 	// GetCurrentAccessNodes.
 }
@@ -59,7 +59,7 @@ type ChainMempool interface {
 	AccessNodesUpdated(accessNodePubKeys []*cryptolib.PublicKey)
 }
 
-type ChainStateMgr interface {
+type ChainStateMgr interface { // TODO: Call the SaveBlock, and handle the result.
 	consGR.StateMgr
 	// Invoked by the chain when new confirmed alias output is received.
 	// This event should be used to mark blocks as confirmed.
@@ -67,11 +67,6 @@ type ChainStateMgr interface {
 	// Invoked by the chain when a set of access nodes has changed.
 	// These nodes should be used to perform block replication.
 	AccessNodesUpdated(accessNodePubKeys []*cryptolib.PublicKey)
-	// Invoked by the chain when new block is produces, but it is not yet
-	// confirmed or published. This functions returns a channel which sends
-	// an error (or nil if no error) after the block is persisted and flushed.
-	// The call can be canceled using a context.
-	BlockProduced(ctx context.Context, aliasOutput *isc.AliasOutputWithID, block state.Block) <-chan error
 }
 
 type RequestOutputHandler = func(outputID iotago.OutputID, output iotago.Output)
@@ -121,7 +116,7 @@ type chainNodeImpl struct {
 	recvAliasOutputPipe pipe.Pipe
 	recvTxPublishedPipe pipe.Pipe
 	recvMilestonePipe   pipe.Pipe
-	consensusInsts      map[chainMgr.CommitteeID]map[journal.LogIndex]*consensusInst // Running consensus instances.
+	consensusInsts      map[iotago.Ed25519Address]map[cmtLog.LogIndex]*consensusInst // Running consensus instances.
 	publishingTXes      map[iotago.TransactionID]context.CancelFunc                  // TX'es now being published.
 	procCache           *processors.Cache                                            // TODO: ...
 	net                 peering.NetworkProvider
@@ -138,9 +133,10 @@ type consensusInst struct {
 
 // This is event received from the NodeConn as response to PublishTX
 type txPublished struct {
-	committeeID chainMgr.CommitteeID
-	txID        iotago.TransactionID
-	confirmed   bool
+	committeeAddr   iotago.Ed25519Address
+	txID            iotago.TransactionID
+	nextAliasOutput *isc.AliasOutputWithID
+	confirmed       bool
 }
 
 var _ ChainNode = &chainNodeImpl{}
@@ -164,7 +160,7 @@ func New(
 		recvAliasOutputPipe: pipe.NewDefaultInfinitePipe(),
 		recvTxPublishedPipe: pipe.NewDefaultInfinitePipe(),
 		recvMilestonePipe:   pipe.NewDefaultInfinitePipe(),
-		consensusInsts:      map[chainMgr.CommitteeID]map[journal.LogIndex]*consensusInst{},
+		consensusInsts:      map[iotago.Ed25519Address]map[cmtLog.LogIndex]*consensusInst{},
 		publishingTXes:      map[iotago.TransactionID]context.CancelFunc{},
 		net:                 net,
 		log:                 log,
@@ -234,8 +230,9 @@ func (cni *chainNodeImpl) handleTxPublished(ctx context.Context, txPubResult *tx
 		return
 	}
 	delete(cni.publishingTXes, txPubResult.txID)
-	msg := chainMgr.NewMsgChainTxPublishResult(cni.me, txPubResult.committeeID, txPubResult.txID, txPubResult.confirmed)
-	outMsgs := cni.chainMgr.AsGPA().Message(msg)
+	outMsgs := cni.chainMgr.AsGPA().Input(
+		chainMgr.NewInputChainTxPublishResult(txPubResult.committeeAddr, txPubResult.txID, txPubResult.nextAliasOutput, txPubResult.confirmed),
+	)
 	if outMsgs.Count() != 0 { // TODO: Wrong, NextLI will be exchanged.
 		panic("unexpected messages from the chainMgr")
 	}
@@ -243,8 +240,9 @@ func (cni *chainNodeImpl) handleTxPublished(ctx context.Context, txPubResult *tx
 }
 
 func (cni *chainNodeImpl) handleAliasOutput(ctx context.Context, aliasOutput *isc.AliasOutputWithID) {
-	msg := chainMgr.NewMsgAliasOutputConfirmed(cni.me, aliasOutput)
-	outMsgs := cni.chainMgr.AsGPA().Message(msg)
+	outMsgs := cni.chainMgr.AsGPA().Input(
+		chainMgr.NewInputAliasOutputConfirmed(aliasOutput),
+	)
 	if outMsgs.Count() != 0 { // TODO: Wrong, NextLI will be exchanged.
 		panic(xerrors.Errorf("unexpected messaged from chainMgr: %+v", outMsgs))
 	}
@@ -265,51 +263,54 @@ func (cni *chainNodeImpl) handleMilestoneTimestamp(timestamp time.Time) {
 func (cni *chainNodeImpl) handleChainMgrOutput(ctx context.Context, outputUntyped gpa.Output) {
 	if outputUntyped == nil {
 		cni.cleanupConsensusInsts(nil, nil)
-		cni.cleanupPublishingTXes([]chainMgr.NeedPostedTX{})
+		cni.cleanupPublishingTXes(map[iotago.TransactionID]*chainMgr.NeedPublishTX{})
 		return
 	}
 	output := outputUntyped.(*chainMgr.Output)
 	//
 	// Start new consensus instances, if needed.
-	if output.NeedConsensus != nil {
-		ci := cni.ensureConsensusInst(ctx, output.NeedConsensus)
+	outputNeedConsensus := output.NeedConsensus()
+	if outputNeedConsensus != nil {
+		ci := cni.ensureConsensusInst(ctx, outputNeedConsensus)
 		if ci.aliasOutput == nil {
-			outputCh, recoverCh := ci.consensus.Input(output.NeedConsensus.BaseAliasOutput)
-			ci.aliasOutput = output.NeedConsensus.BaseAliasOutput
+			outputCh, recoverCh := ci.consensus.Input(outputNeedConsensus.BaseAliasOutput)
+			ci.aliasOutput = outputNeedConsensus.BaseAliasOutput
 			ci.outputCh = outputCh   // TODO: Read from these.
 			ci.recoverCh = recoverCh // TODO: Read from these.
 		}
 	}
 	//
 	// Start publishing TX'es, if there not being posted already.
-	for i := range output.NeedPostTXes {
-		txToPost := output.NeedPostTXes[i] // Have to take a copy to be used in callback.
+	outputNeedPostTXes := output.NeedPublishTX()
+	for i := range outputNeedPostTXes {
+		txToPost := outputNeedPostTXes[i] // Have to take a copy to be used in callback.
 		if _, ok := cni.publishingTXes[txToPost.TxID]; !ok {
 			subCtx, subCancel := context.WithCancel(ctx)
 			cni.publishingTXes[txToPost.TxID] = subCancel
 			cni.nodeConn.PublishTX(subCtx, cni.chainID, txToPost.Tx, func(tx *iotago.Transaction, confirmed bool) {
 				cni.recvTxPublishedPipe.In() <- &txPublished{
-					committeeID: txToPost.CommitteeID, // TODO: Was journalID: txToPost.JournalID,
-					txID:        txToPost.TxID,
-					confirmed:   confirmed,
+					committeeAddr:   txToPost.CommitteeAddr,
+					txID:            txToPost.TxID,
+					nextAliasOutput: txToPost.NextAliasOutput,
+					confirmed:       confirmed,
 				}
 			})
 		}
 	}
-	cni.cleanupPublishingTXes(output.NeedPostTXes)
+	cni.cleanupPublishingTXes(outputNeedPostTXes)
 }
 
 func (cni *chainNodeImpl) ensureConsensusInst(ctx context.Context, needConsensus *chainMgr.NeedConsensus) *consensusInst {
-	committeeID := needConsensus.CommitteeID
+	committeeAddr := needConsensus.CommitteeAddr
 	logIndex := needConsensus.LogIndex
 	dkShare := needConsensus.DKShare
-	if _, ok := cni.consensusInsts[committeeID]; !ok {
-		cni.consensusInsts[committeeID] = map[journal.LogIndex]*consensusInst{}
+	if _, ok := cni.consensusInsts[committeeAddr]; !ok {
+		cni.consensusInsts[committeeAddr] = map[cmtLog.LogIndex]*consensusInst{}
 	}
 	addLogIndex := logIndex
 	added := false
 	for i := 0; i < consensusInstsInAdvance; i++ {
-		if _, ok := cni.consensusInsts[committeeID][addLogIndex]; !ok {
+		if _, ok := cni.consensusInsts[committeeAddr][addLogIndex]; !ok {
 			consGrCtx, consGrCancel := context.WithCancel(ctx)
 			logIndexCopy := addLogIndex
 			cgr := consGR.New(
@@ -317,7 +318,7 @@ func (cni *chainNodeImpl) ensureConsensusInst(ctx context.Context, needConsensus
 				cni.procCache, cni.mempool, cni.stateMgr, cni.net,
 				recoveryTimeout, redeliveryPeriod, printStatusPeriod, cni.log,
 			)
-			cni.consensusInsts[committeeID][addLogIndex] = &consensusInst{ // TODO: Handle terminations somehow.
+			cni.consensusInsts[committeeAddr][addLogIndex] = &consensusInst{ // TODO: Handle terminations somehow.
 				cancelFunc: consGrCancel,
 				consensus:  cgr,
 			}
@@ -326,18 +327,18 @@ func (cni *chainNodeImpl) ensureConsensusInst(ctx context.Context, needConsensus
 		addLogIndex = addLogIndex.Next()
 	}
 	if added {
-		cni.cleanupConsensusInsts(&committeeID, &logIndex)
+		cni.cleanupConsensusInsts(&committeeAddr, &logIndex)
 	}
-	return cni.consensusInsts[committeeID][logIndex]
+	return cni.consensusInsts[committeeAddr][logIndex]
 }
 
-func (cni *chainNodeImpl) cleanupConsensusInsts(keepCommitteeID *chainMgr.CommitteeID, keepLogIndex *journal.LogIndex) {
-	for cmtID := range cni.consensusInsts {
-		for li := range cni.consensusInsts[cmtID] {
-			if keepCommitteeID != nil && keepLogIndex != nil && cmtID == *keepCommitteeID && li >= *keepLogIndex {
+func (cni *chainNodeImpl) cleanupConsensusInsts(keepCommitteeAddr *iotago.Ed25519Address, keepLogIndex *cmtLog.LogIndex) {
+	for cmtAddr := range cni.consensusInsts {
+		for li := range cni.consensusInsts[cmtAddr] {
+			if keepCommitteeAddr != nil && keepLogIndex != nil && cmtAddr.Equal(keepCommitteeAddr) && li >= *keepLogIndex {
 				continue
 			}
-			ci := cni.consensusInsts[cmtID][li]
+			ci := cni.consensusInsts[cmtAddr][li]
 			if ci.aliasOutput == nil && ci.cancelFunc != nil {
 				// We can cancel an instance, if input was not yet provided.
 				ci.cancelFunc() // TODO: Somehow cancel hanging instances, maybe with old LogIndex, etc.
@@ -348,7 +349,7 @@ func (cni *chainNodeImpl) cleanupConsensusInsts(keepCommitteeID *chainMgr.Commit
 }
 
 // Cleanup TX'es that are not needed to be posted anymore.
-func (cni *chainNodeImpl) cleanupPublishingTXes(neededPostTXes []chainMgr.NeedPostedTX) {
+func (cni *chainNodeImpl) cleanupPublishingTXes(neededPostTXes map[iotago.TransactionID]*chainMgr.NeedPublishTX) {
 	for txID, cancelFunc := range cni.publishingTXes {
 		found := false
 		for _, npt := range neededPostTXes {

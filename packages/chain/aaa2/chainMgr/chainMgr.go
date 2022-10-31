@@ -3,101 +3,150 @@
 
 // TODO: Cleanup the committees not used for a long time.
 
-// This package implements a protocol for running a chain in a node. Its main responsibilities:
-//   - Decide, which branch is the correct one.
+// This package implements a protocol for running a chain in a node.
+// Its main responsibilities:
+//   - Track, which branch is the latest/correct one.
 //   - Maintain a set of committee logs (1 for each committee this node participates in).
 //   - Maintain a set of consensus instances (one of them is the current one).
 //   - Supervise the Mempool and StateMgr.
 //   - Handle messages from the NodeConn (AO confirmed / rejected, Request received).
 //   - Posting StateTX to NodeConn.
-//   - ...
 //
-// TODO: Manage the access nodes (per node and from the governance contract).
-// TODO: Output contains consensus needed to run,
-// TODO: Pass AO to the cmtLog, update the consensus accordingly.
-// TODO: NodeConn has to return AO chains (all in the milestone at once).
-// TODO: Don't persist TX'es to post. In-memory is enough.
-// TODO: Save Block to StateMgr from the Consensus.
-// TODO: Where the OriginState should be created?
-// TODO: We have to track the main "branch" here, and provide access to the HEAD.
-//
-// TODO: Pass MSG to CmtLog: AO Confirmed
-// TODO: Pass MSG to CmtLog: AO Rejected
-// TODO: Pass MSG to CmtLog: AO Consensus Done
-// TODO: Pass MSG to CmtLog: AO Consensus Timeout
-// TODO: Pass MSG to CmtLog: AO Suspend
-// TODO: Pass MSG to CmtLog: AO TimerTick
-// TODO: Wrap CmtLog out messages (NextLI).
-//
-// > UPON Reception of Confirmed AO:
-// >     Pass it to the corresponding CmtLog.
-// >     Send Suspend to all the other CmtLogs.
+// > VARIABLES:
+// >     LatestActiveCmt -- The latest committee, that was active.
+// >        This field will be nil if the node is not part of the committee.
+// >        On the resynchronization it will store the previous active committee.
+// >     LatestActiveAO -- The latest AO we are building upon.
+// >        Derived, equal to NeedConsensus.BaseAO.
+// >     LatestConfirmedAO -- The latest ConfirmedAO from L1.
+// >        This one usually follows the LatestAliasOutput,
+// >        but can be published from outside and override the LatestAliasOutput.
+// >     AccessNodes -- The set of access nodes for the current head.
+// >        Union of On-Chain access nodes and the nodes permitted by this node.
+// >     NeedConsensus -- A request to run consensus.
+// >        Always set based on output of the main CmtLog.
+// >     NeedPublishTX -- Requests to publish TX'es.
+// >        - Added upon reception of the Consensus Output,
+// >          if it is still in NeedConsensus at the time.
+// >        - Removed on PublishResult from the NodeConn.
+// >
+// > UPON Reception of ConfirmedAO:
+// >     Set LatestConfirmedAO <- ConfirmedAO
+// >     IF this node is in the committee THEN
+// >         Pass it to the corresponding CmtLog; HandleCmtLogOutput.
+// >     ELSE
+// >         IF LatestActiveCmt != nil THEN
+// >     	     Send Suspend to Last Active CmtLog; HandleCmtLogOutput
+// >         Set LatestActiveCmt <- NIL
+// >         Set NeedConsensus <- NIL
 // > UPON Reception of PublishResult:
-// >     // TODO: ...
-// > UPON Reception of Consensus Output:
-// >     Forward the message to the corresponding CmtLog.
-// >     // TODO: Add to TX'es to publish?
-// >     // TODO: Clear the request for consensus?
+// >     Clear the TX from the NeedPublishTX variable.
+// >     If result.confirmed = false THEN
+// >         Forward it to ChainMgr; HandleCmtLogOutput.
+// >     ELSE
+// >         NOP // AO has to be received as ConfirmedAO.
+// > UPON Reception of Consensus Output/DONE:
+// >     IF ConsensusOutput.BaseAO == NeedConsensus THEN
+// >         Add ConsensusOutput.TX to NeedPublishTX
+// >     Forward the message to the corresponding CmtLog; HandleCmtLogOutput.
+// >     Update AccessNodes.
+// > UPON Reception of Consensus Output/SKIP:
+// >     Forward the message to the corresponding CmtLog; HandleCmtLogOutput.
 // > UPON Reception of Consensus Timeout:
-// >     Forward the message to the corresponding CmtLog.
+// >     Forward the message to the corresponding CmtLog; HandleCmtLogOutput.
 // > UPON Reception of CmtLog.NextLI message:
-// >     Forward it to the corresponding CmtLog.
+// >     Forward it to the corresponding CmtLog; HandleCmtLogOutput.
+// >
+// > PROCEDURE HandleCmtLogOutput(cmt):
+// >     Wrap out messages.
+// >     IF cmt == LatestActiveCmt || LatestActiveCmt == NIL THEN
+// >         Set LatestActiveCmt <- cmt
+// >         Set NeedConsensus <- output.NeedConsensus // Can be nil
+// >     ELSE
+// >         IF output.NeedConsensus == nil THEN
+// >             RETURN // No need to change the committee.
+// >         IF LatestActiveCmt != nil THEN
+// >             Suspend(LatestActiveCmt)
+// >         Set LatestActiveCmt <- cmt
+// >         Set NeedConsensus <- output.NeedConsensus
 package chainMgr
 
 import (
 	"errors"
+	"fmt"
 
 	"golang.org/x/xerrors"
 
 	"github.com/iotaledger/hive.go/core/logger"
 	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/cmtLog"
-	"github.com/iotaledger/wasp/packages/chain/consensus/journal"
 	"github.com/iotaledger/wasp/packages/cryptolib"
 	"github.com/iotaledger/wasp/packages/gpa"
 	"github.com/iotaledger/wasp/packages/isc"
-	"github.com/iotaledger/wasp/packages/registry"
 	"github.com/iotaledger/wasp/packages/tcrypto"
 )
 
 var ErrNotInCommittee = errors.New("ErrNotInCommittee")
 
-type CommitteeID = string // AliasOutput().StateController().Key()
-
-func CommitteeIDFromAddress(committeeAddress iotago.Address) CommitteeID {
-	return committeeAddress.Key()
-}
-
 type Output struct {
-	NeedConsensus *NeedConsensus
-	NeedPostTXes  []NeedPostedTX
+	cmi *chainMgrImpl
 }
+
+func (o *Output) LatestActiveAliasOutput() *isc.AliasOutputWithID {
+	if o.cmi.needConsensus == nil {
+		return nil
+	}
+	return o.cmi.needConsensus.BaseAliasOutput
+}
+func (o *Output) LatestConfirmedAliasOutput() *isc.AliasOutputWithID     { return o.cmi.latestConfirmedAO }
+func (o *Output) ActiveAccessNodes() []*cryptolib.PublicKey              { return o.cmi.activeAccessNodes }
+func (o *Output) NeedConsensus() *NeedConsensus                          { return o.cmi.needConsensus }
+func (o *Output) NeedPublishTX() map[iotago.TransactionID]*NeedPublishTX { return o.cmi.needPublishTX }
+
 type NeedConsensus struct {
-	CommitteeID     CommitteeID
-	LogIndex        journal.LogIndex
+	CommitteeAddr   iotago.Ed25519Address
+	LogIndex        cmtLog.LogIndex
 	DKShare         tcrypto.DKShare
 	BaseAliasOutput *isc.AliasOutputWithID
 }
 
-type NeedPostedTX struct {
-	CommitteeID CommitteeID
-	TxID        iotago.TransactionID
-	Tx          *iotago.Transaction
+func (nc *NeedConsensus) IsFor(output *cmtLog.Output) bool {
+	return output.GetLogIndex() == nc.LogIndex && output.GetBaseAliasOutput().Equals(nc.BaseAliasOutput)
+}
+
+type NeedPublishTX struct {
+	CommitteeAddr     iotago.Ed25519Address
+	TxID              iotago.TransactionID
+	Tx                *iotago.Transaction
+	BaseAliasOutputID iotago.OutputID        // The consumed AliasOutput.
+	NextAliasOutput   *isc.AliasOutputWithID // The next one (produced by the TX.)
 }
 
 type ChainMgr interface {
 	AsGPA() gpa.GPA
 }
 
+type cmtLogInst struct {
+	committeeAddr iotago.Ed25519Address
+	gpaInstance   gpa.GPA
+	pendingMsgs   []gpa.Message
+}
+
 type chainMgrImpl struct {
-	chainID          isc.ChainID                      // This instance is responsible for this chain.
-	cmtLogs          map[CommitteeID]gpa.GPA          // TODO: ...
-	dkReg            registry.DKShareRegistryProvider // TODO: What ir DKShare is stored after some AO is received?
-	output           *Output
-	asGPA            gpa.GPA
-	me               gpa.NodeID
-	nodeIDFromPubKey func(pubKey *cryptolib.PublicKey) gpa.NodeID
-	log              *logger.Logger
+	chainID           isc.ChainID                             // This instance is responsible for this chain.
+	cmtLogs           map[iotago.Ed25519Address]*cmtLogInst   // All the committee log instances for this chain.
+	cmtLogStore       cmtLog.Store                            // Persistent store for log indexes.
+	latestActiveCmt   *iotago.Ed25519Address                  // The latest active committee.
+	latestConfirmedAO *isc.AliasOutputWithID                  // The latest confirmed AO (follows Active AO).
+	activeAccessNodes []*cryptolib.PublicKey                  // All the nodes authorized for being access nodes (for the ActiveAO).
+	needConsensus     *NeedConsensus                          // Query for a consensus.
+	needPublishTX     map[iotago.TransactionID]*NeedPublishTX // Query to post TXes.
+	dkReg             tcrypto.DKShareRegistryProvider         // Source for DKShares.
+	output            *Output
+	asGPA             gpa.GPA
+	me                gpa.NodeID
+	nodeIDFromPubKey  func(pubKey *cryptolib.PublicKey) gpa.NodeID
+	log               *logger.Logger
 }
 
 var (
@@ -108,19 +157,23 @@ var (
 func New(
 	me gpa.NodeID,
 	chainID isc.ChainID,
-	dkReg registry.DKShareRegistryProvider,
+	cmtLogStore cmtLog.Store,
+	dkReg tcrypto.DKShareRegistryProvider,
 	nodeIDFromPubKey func(pubKey *cryptolib.PublicKey) gpa.NodeID,
 	log *logger.Logger,
 ) (ChainMgr, error) {
 	cmi := &chainMgrImpl{
 		chainID:          chainID,
-		cmtLogs:          map[CommitteeID]gpa.GPA{},
+		cmtLogs:          map[iotago.Ed25519Address]*cmtLogInst{},
+		cmtLogStore:      cmtLogStore,
+		needConsensus:    nil,
+		needPublishTX:    map[iotago.TransactionID]*NeedPublishTX{},
 		dkReg:            dkReg,
-		output:           &Output{NeedConsensus: nil, NeedPostTXes: nil},
 		me:               me,
 		nodeIDFromPubKey: nodeIDFromPubKey,
 		log:              log,
 	}
+	cmi.output = &Output{cmi: cmi}
 	cmi.asGPA = gpa.NewOwnHandler(me, cmi)
 	return cmi, nil
 }
@@ -132,148 +185,217 @@ func (cmi *chainMgrImpl) AsGPA() gpa.GPA {
 
 // Implements the gpa.GPA interface.
 func (cmi *chainMgrImpl) Input(input gpa.Input) gpa.OutMessages {
-	panic(xerrors.Errorf("should not be used"))
+	switch input := input.(type) {
+	case *inputAliasOutputConfirmed:
+		return cmi.handleInputAliasOutputConfirmed(input)
+	case *inputChainTxPublishResult:
+		return cmi.handleInputChainTxPublishResult(input)
+	case *inputConsensusOutputDone:
+		return cmi.handleInputConsensusOutputDone(input)
+	case *inputConsensusOutputSkip:
+		return cmi.handleInputConsensusOutputSkip(input)
+	case *inputConsensusTimeout:
+		return cmi.handleInputConsensusTimeout(input)
+	}
+	panic(xerrors.Errorf("unexpected input %T: %+v", input, input))
 }
 
 // Implements the gpa.GPA interface.
 func (cmi *chainMgrImpl) Message(msg gpa.Message) gpa.OutMessages {
-	switch msg := msg.(type) {
-	case *msgAliasOutputConfirmed:
-		return cmi.handleMsgAliasOutputConfirmed(msg)
-	case *msgChainTxPublishResult:
-		return cmi.handleMsgChainTxPublishResult(msg)
-	case *msgConsensusOutput:
-		return cmi.handleMsgConsensusOutput(msg)
-	case *msgConsensusTimeout:
-		return cmi.handleMsgConsensusTimeout(msg)
-	case *msgCmtLog:
-		return cmi.handleMsgCmtLog(msg)
+	msgCL, ok := msg.(*msgCmtLog)
+	if !ok {
+		panic(xerrors.Errorf("unexpected message %T: %+v", msg, msg))
 	}
-	cmi.log.Warnf("dropping unexpected message: %+v", msg)
-	return nil
+	return cmi.handleMsgCmtLog(msgCL)
 }
 
-// > UPON Reception of Confirmed AO:
-// >     Pass it to the corresponding CmtLog.
-// >     Send Suspend to all the other CmtLogs.
-func (cmi *chainMgrImpl) handleMsgAliasOutputConfirmed(msg *msgAliasOutputConfirmed) gpa.OutMessages {
-	cmi.log.Debugf("handleMsgAliasOutputConfirmed: %v", msg.aliasOutput)
+// > UPON Reception of ConfirmedAO:
+// >     Set LatestConfirmedAO <- ConfirmedAO
+// >     IF this node is in the committee THEN
+// >         Pass it to the corresponding CmtLog; HandleCmtLogOutput(ConfirmedAO.Cmt).
+// >     ELSE
+// >         IF LatestActiveCmt != nil THEN
+// >     	     Send Suspend to Last Active CmtLog; HandleCmtLogOutput(LatestActiveCmt)
+// >         Set LatestActiveCmt <- NIL
+// >         Set NeedConsensus <- NIL
+func (cmi *chainMgrImpl) handleInputAliasOutputConfirmed(input *inputAliasOutputConfirmed) gpa.OutMessages {
+	cmi.log.Debugf("handleInputAliasOutputConfirmed: %+v", input)
+	//
+	// >     Set LatestConfirmedAO <- ConfirmedAO
+	cmi.latestConfirmedAO = input.aliasOutput
 	msgs := gpa.NoMessages()
-	committeeAddress := msg.aliasOutput.GetAliasOutput().StateController()
-	committeeLog, committeeID, cmtMsgs, err := cmi.ensureCmtLog(committeeAddress)
+	committeeAddr := input.aliasOutput.GetAliasOutput().StateController().(*iotago.Ed25519Address)
+	committeeLog, cmtMsgs, err := cmi.ensureCmtLog(*committeeAddr)
 	msgs.AddAll(cmtMsgs)
 	if errors.Is(err, ErrNotInCommittee) {
-		cmi.log.Debugf("This node is not in the committee for aliasOutput: %v", msg.aliasOutput)
-		return nil
+		// >     IF this node is in the committee THEN ... ELSE
+		// >         IF LatestActiveCmt != nil THEN
+		// >     	     Send Suspend to Last Active CmtLog; HandleCmtLogOutput(LatestActiveCmt)
+		// >         Set LatestActiveCmt <- NIL
+		// >         Set NeedConsensus <- NIL
+		if cmi.latestActiveCmt != nil {
+			msgs.AddAll(cmi.suspendCommittee(cmi.latestActiveCmt))
+		}
+		cmi.latestActiveCmt = nil
+		cmi.needConsensus = nil
+		cmi.log.Debugf("This node is not in the committee for aliasOutput: %v", input.aliasOutput)
+		return msgs
 	}
 	if err != nil {
 		cmi.log.Warnf("Failed to get CmtLog: %v", err)
-		return nil
+		return msgs
 	}
+	// >     IF this node is in the committee THEN
+	// >         Pass it to the corresponding CmtLog; HandleCmtLogOutput.
 	msgs.AddAll(cmi.handleCmtLogOutput(
-		committeeLog, committeeID,
-		committeeLog.Message(cmtLog.NewMsgAliasOutputConfirmed(cmi.me, msg.aliasOutput)),
+		committeeLog,
+		committeeLog.gpaInstance.Input(cmtLog.NewInputAliasOutputConfirmed(input.aliasOutput)),
 	))
-	for cid, cl := range cmi.cmtLogs {
-		if cid == committeeID {
-			continue
-		}
-		msgs.AddAll(cmi.handleCmtLogOutput(
-			cl, cid,
-			cl.Message(cmtLog.NewMsgSuspend(cmi.me)),
-		))
-	}
 	return msgs
 }
 
 // > UPON Reception of PublishResult:
-// >     // TODO: ...
-func (cmi *chainMgrImpl) handleMsgChainTxPublishResult(msg *msgChainTxPublishResult) gpa.OutMessages {
-	if msg.confirmed {
-		// TODO: Delete it from the needed tx pubs
-		// TODO: Call the handleMsgAliasOutputConfirmed???
+// >     Clear the TX from the NeedPublishTX variable.
+// >     If result.confirmed = false THEN
+// >         Forward it to ChainMgr; HandleCmtLogOutput.
+// >     ELSE
+// >         NOP // AO has to be received as Confirmed AO.
+func (cmi *chainMgrImpl) handleInputChainTxPublishResult(input *inputChainTxPublishResult) gpa.OutMessages {
+	cmi.log.Debugf("handleInputChainTxPublishResult: %+v", input)
+	// >     Clear the TX from the NeedPublishTX variable.
+	delete(cmi.needPublishTX, input.txID)
+	if input.confirmed {
+		// >     If result.confirmed = false THEN ... ELSE
+		// >         NOP // AO has to be received as Confirmed AO.
 		return nil
 	}
-	// TODO: Send reject to the appropriate CL.
-	return nil // TODO: ...
+	// >     If result.confirmed = false THEN
+	// >         Forward it to ChainMgr; HandleCmtLogOutput.
+	return cmi.withCmtLog(input.committeeAddr, func(cl gpa.GPA) gpa.OutMessages {
+		return cl.Input(cmtLog.NewInputAliasOutputRejected(input.aliasOutput))
+	})
 }
 
-// TODO: Have to be used for pipelining. We have started to publish the TX, we can try to build on it.
-//
-// > UPON Reception of Consensus Output:
-// >     Forward the message to the corresponding CmtLog.
-// >     // TODO: Add to TX'es to publish?
-// >     // TODO: Clear the request for consensus?
-func (cmi *chainMgrImpl) handleMsgConsensusOutput(msg *msgConsensusOutput) gpa.OutMessages {
-	committeeLog, ok := cmi.cmtLogs[msg.committeeID]
-	if !ok {
-		cmi.log.Warnf("Discarding consensus output for unknown committeeID: %+v", msg)
-		return nil
+// > UPON Reception of Consensus Output/DONE:
+// >     IF ConsensusOutput.BaseAO == NeedConsensus THEN
+// >         Add ConsensusOutput.TX to NeedPublishTX
+// >     Forward the message to the corresponding CmtLog; HandleCmtLogOutput.
+// >     Update AccessNodes.
+func (cmi *chainMgrImpl) handleInputConsensusOutputDone(input *inputConsensusOutputDone) gpa.OutMessages {
+	cmi.log.Debugf("handleInputConsensusOutputDone: %+v", input)
+	// >     IF ConsensusOutput.BaseAO == NeedConsensus THEN
+	// >         Add ConsensusOutput.TX to NeedPublishTX
+	if cmi.needConsensus.BaseAliasOutput.ID().Equals(input.baseAliasOutputID.UTXOInput()) {
+		txID := input.nextAliasOutput.ID().TransactionID
+		cmi.needPublishTX[txID] = &NeedPublishTX{
+			CommitteeAddr:     input.committeeAddr,
+			TxID:              txID,
+			Tx:                input.transaction,
+			BaseAliasOutputID: input.baseAliasOutputID,
+			NextAliasOutput:   input.nextAliasOutput,
+		}
 	}
-	return cmi.handleCmtLogOutput( // TODO: Cleanup request for a consensus? Thats in the handler probably?
-		committeeLog, msg.committeeID,
-		committeeLog.Message(cmtLog.NewMsgConsensusOutput(cmi.me, msg.logIndex, msg.baseAliasOutputID, msg.nextAliasOutput)),
-	)
+	//
+	// >     Forward the message to the corresponding CmtLog; HandleCmtLogOutput.
+	return cmi.withCmtLog(input.committeeAddr, func(cl gpa.GPA) gpa.OutMessages {
+		return cl.Input(cmtLog.NewInputConsensusOutputDone(input.logIndex, input.baseAliasOutputID, input.nextAliasOutput))
+	})
+
+	// TODO:
+	// >     Update AccessNodes.
+}
+
+// > UPON Reception of Consensus Output/SKIP:
+// >     Forward the message to the corresponding CmtLog; HandleCmtLogOutput.
+func (cmi *chainMgrImpl) handleInputConsensusOutputSkip(input *inputConsensusOutputSkip) gpa.OutMessages {
+	return cmi.withCmtLog(input.committeeAddr, func(cl gpa.GPA) gpa.OutMessages {
+		return cl.Input(cmtLog.NewInputConsensusOutputSkip(input.logIndex, input.baseAliasOutputID))
+	})
 }
 
 // > UPON Reception of Consensus Timeout:
-// >     Forward the message to the corresponding CmtLog.
-func (cmi *chainMgrImpl) handleMsgConsensusTimeout(msg *msgConsensusTimeout) gpa.OutMessages {
-	committeeLog, ok := cmi.cmtLogs[msg.committeeID]
-	if !ok {
-		cmi.log.Warnf("Dropping msgConsensusTimeout for unknown committeeID: %+v", msg)
-		return nil
-	}
-	return cmi.handleCmtLogOutput(
-		committeeLog, msg.committeeID,
-		committeeLog.Message(cmtLog.NewMsgConsensusTimeout(cmi.me, msg.logIndex)),
-	)
+// >     Forward the message to the corresponding CmtLog; HandleCmtLogOutput.
+func (cmi *chainMgrImpl) handleInputConsensusTimeout(input *inputConsensusTimeout) gpa.OutMessages {
+	cmi.log.Debugf("handleInputConsensusTimeout: %+v", input)
+	return cmi.withCmtLog(input.committeeAddr, func(cl gpa.GPA) gpa.OutMessages {
+		return cl.Input(cmtLog.NewInputConsensusTimeout(input.logIndex))
+	})
 }
 
 // > UPON Reception of CmtLog.NextLI message:
-// >     Forward it to the corresponding CmtLog.
+// >     Forward it to the corresponding CmtLog; HandleCmtLogOutput.
 func (cmi *chainMgrImpl) handleMsgCmtLog(msg *msgCmtLog) gpa.OutMessages {
-	committeeLog, ok := cmi.cmtLogs[msg.committeeID]
-	if !ok {
-		cmi.log.Warnf("Message for non-existing CmtLog: %+v", msg)
-	}
-	return cmi.handleCmtLogOutput(
-		committeeLog, msg.committeeID,
-		committeeLog.Message(msg.wrapped),
-	)
+	cmi.log.Debugf("handleMsgCmtLog: %+v", msg)
+	return cmi.withCmtLog(msg.committeeAddr, func(cl gpa.GPA) gpa.OutMessages {
+		return cl.Message(msg.wrapped)
+	})
 }
 
-// NOTE: ErrNotInCommittee
-func (cmi *chainMgrImpl) ensureCmtLog(committeeAddress iotago.Address) (gpa.GPA, CommitteeID, gpa.OutMessages, error) {
-	committeeID := CommitteeIDFromAddress(committeeAddress)
-	if cl, ok := cmi.cmtLogs[committeeID]; ok {
-		return cl, committeeID, nil, nil
-	}
+// > PROCEDURE HandleCmtLogOutput(cmt):
+// >     Wrap out messages.
+// >     IF cmt == LatestActiveCmt || LatestActiveCmt == NIL THEN
+// >         Set LatestActiveCmt <- cmt
+// >         Set NeedConsensus <- output.NeedConsensus // Can be nil
+// >     ELSE
+// >         IF output.NeedConsensus == nil THEN
+// >             RETURN // No need to change the committee.
+// >         IF LatestActiveCmt != nil THEN
+// >             Suspend(LatestActiveCmt)
+// >         Set LatestActiveCmt <- cmt
+// >         Set NeedConsensus <- output.NeedConsensus
+func (cmi *chainMgrImpl) handleCmtLogOutput(cli *cmtLogInst, cliMsgs gpa.OutMessages) gpa.OutMessages {
 	//
-	// Create a committee if not created yet.
-	dkShare, err := cmi.dkReg.LoadDKShare(committeeAddress)
-	if errors.Is(err, registry.ErrDKShareNotFound) { // TODO: This interface and error definition should be along with the DKShare.
-		return nil, committeeID, nil, ErrNotInCommittee
+	// >     Wrap out messages.
+	msgs := gpa.NoMessages()
+	msgs.AddAll(cmi.wrapCmtLogMsgs(cli, cliMsgs))
+	outputUntyped := cli.gpaInstance.Output()
+	// >     IF cmt == LatestActiveCmt || LatestActiveCmt == NIL THEN
+	// >         Set LatestActiveCmt <- cmt
+	// >         Set NeedConsensus <- output.NeedConsensus // Can be nil
+	if cmi.latestActiveCmt == nil || cli.committeeAddr.Equal(cmi.latestActiveCmt) {
+		cmi.latestActiveCmt = &cli.committeeAddr
+		cmi.ensureNeedConsensus(cli, outputUntyped)
+		return msgs
 	}
-	if err != nil {
-		return nil, committeeID, nil, xerrors.Errorf("cannot load DKShare for committeeAddress=%v: %w", committeeAddress, err)
+	// >     ELSE
+	// >         IF output.NeedConsensus == nil THEN
+	// >             RETURN // No need to change the committee.
+	// >         IF LatestActiveCmt != nil THEN
+	// >             Suspend(LatestActiveCmt)
+	// >         Set LatestActiveCmt <- cmt
+	// >         Set NeedConsensus <- output.NeedConsensus
+	if outputUntyped == nil {
+		return msgs
 	}
-
-	clInst, err := cmtLog.New(cmi.me, cmi.chainID, dkShare, nil, cmi.nodeIDFromPubKey, cmi.log) // TODO: Pass Store
-	if err != nil {
-		return nil, committeeID, nil, xerrors.Errorf("cannot create cmtLog for committeeAddress=%v: %w", committeeAddress, err)
+	if !cmi.latestActiveCmt.Equal(&cli.committeeAddr) {
+		msgs.AddAll(cmi.suspendCommittee(cmi.latestActiveCmt))
 	}
-	cl := clInst.AsGPA()
-	cmi.cmtLogs[committeeID] = cl
-	msgs := cmi.handleCmtLogOutput(
-		cl, committeeID, cl.Input(nil),
-	)
-	return cl, committeeID, msgs, nil
+	cmi.latestActiveCmt = &cli.committeeAddr
+	cmi.ensureNeedConsensus(cli, outputUntyped)
+	return msgs
 }
 
-func (cmi *chainMgrImpl) handleCmtLogOutput(committeeLog gpa.GPA, committeeID CommitteeID, outMsgs gpa.OutMessages) gpa.OutMessages {
-	// TODO: wrap msgs, handle outputs ...
-	return outMsgs
+func (cmi *chainMgrImpl) ensureNeedConsensus(cli *cmtLogInst, outputUntyped gpa.Output) {
+	if outputUntyped == nil {
+		cmi.needConsensus = nil
+		return
+	}
+	output := outputUntyped.(*cmtLog.Output)
+	if cmi.needConsensus != nil && cmi.needConsensus.IsFor(output) {
+		// Not changed, keep it.
+		return
+	}
+	committeeAddress := output.GetBaseAliasOutput().GetStateAddress()
+	dkShare, err := cmi.dkReg.LoadDKShare(committeeAddress)
+	if err != nil {
+		panic(xerrors.Errorf("cannot load DKShare for %v", committeeAddress))
+	}
+	cmi.needConsensus = &NeedConsensus{
+		CommitteeAddr:   cli.committeeAddr,
+		LogIndex:        output.GetLogIndex(),
+		DKShare:         dkShare,
+		BaseAliasOutput: output.GetBaseAliasOutput(),
+	}
 }
 
 // Implements the gpa.GPA interface.
@@ -283,5 +405,70 @@ func (cmi *chainMgrImpl) Output() gpa.Output {
 
 // Implements the gpa.GPA interface.
 func (cmi *chainMgrImpl) StatusString() string {
-	return "{}" // TODO: Implement.
+	return fmt.Sprintf("{ChainMgr,confirmedAO=%v,activeAO=%v}",
+		cmi.output.LatestConfirmedAliasOutput().String(),
+		cmi.output.LatestActiveAliasOutput().String(),
+	)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Helper functions.
+
+func (cmi *chainMgrImpl) wrapCmtLogMsgs(cli *cmtLogInst, outMsgs gpa.OutMessages) gpa.OutMessages {
+	wrappedMsgs := gpa.NoMessages()
+	outMsgs.MustIterate(func(msg gpa.Message) {
+		wrappedMsgs.Add(NewMsgCmtLog(cli.committeeAddr, msg))
+	})
+	return wrappedMsgs
+}
+
+func (cmi *chainMgrImpl) suspendCommittee(committeeAddr *iotago.Ed25519Address) gpa.OutMessages {
+	for ca, cli := range cmi.cmtLogs {
+		if !ca.Equal(committeeAddr) {
+			continue
+		}
+		return cmi.wrapCmtLogMsgs(cli, cli.gpaInstance.Input(cmtLog.NewInputSuspend()))
+	}
+	return nil
+}
+
+func (cmi *chainMgrImpl) withCmtLog(committeeAddr iotago.Ed25519Address, handler func(cl gpa.GPA) gpa.OutMessages) gpa.OutMessages {
+	cli, clMsgs, err := cmi.ensureCmtLog(committeeAddr)
+	if err != nil {
+		cmi.log.Warnf("cannot find committee: %v", committeeAddr)
+		return nil
+	}
+	return gpa.NoMessages().
+		AddAll(clMsgs).
+		AddAll(cmi.handleCmtLogOutput(cli, handler(cli.gpaInstance)))
+}
+
+// NOTE: ErrNotInCommittee
+func (cmi *chainMgrImpl) ensureCmtLog(committeeAddr iotago.Ed25519Address) (*cmtLogInst, gpa.OutMessages, error) {
+	if cli, ok := cmi.cmtLogs[committeeAddr]; ok {
+		return cli, nil, nil
+	}
+	//
+	// Create a committee if not created yet.
+	dkShare, err := cmi.dkReg.LoadDKShare(&committeeAddr)
+	if errors.Is(err, tcrypto.ErrDKShareNotFound) {
+		return nil, nil, ErrNotInCommittee
+	}
+	if err != nil {
+		return nil, nil, xerrors.Errorf("cannot load DKShare for committeeAddress=%v: %w", committeeAddr, err)
+	}
+
+	clInst, err := cmtLog.New(cmi.me, cmi.chainID, dkShare, cmi.cmtLogStore, cmi.nodeIDFromPubKey, cmi.log)
+	if err != nil {
+		return nil, nil, xerrors.Errorf("cannot create cmtLog for committeeAddress=%v: %w", committeeAddr, err)
+	}
+	clGPA := clInst.AsGPA()
+	cli := &cmtLogInst{
+		committeeAddr: committeeAddr,
+		gpaInstance:   clGPA,
+		pendingMsgs:   []gpa.Message{},
+	}
+	cmi.cmtLogs[committeeAddr] = cli
+	msgs := cmi.handleCmtLogOutput(cli, clGPA.Input(cmtLog.NewInputStart()))
+	return cli, msgs, nil
 }

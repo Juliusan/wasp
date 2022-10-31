@@ -30,6 +30,7 @@
 // >     Start VM.
 // > UPON Reception of VM Result:
 // >     IF result is non-empty THEN
+// >         Save the produced block to SM.
 // >         Submit the result hash to the DSS.
 // >     ELSE
 // >         OUTPUT SKIP
@@ -48,13 +49,14 @@
 //
 // TODO: Handle the requests gracefully in the VM before getting the initTX.
 // TODO: Reconsider the termination. Do we need to wait for DSS, RND?
-// TODO: Add block write to the StateMgr.
+// TODO: Add BaseAliasOutput to the BatchProposal to avoid having it in the StateMgr.
 package cons
 
 import (
 	"crypto/ed25519"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"go.dedis.ch/kyber/v3"
 	"go.dedis.ch/kyber/v3/suites"
@@ -64,13 +66,6 @@ import (
 	"github.com/iotaledger/hive.go/core/logger"
 	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/bp"
-	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/subsystemACS"
-	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/subsystemDSS"
-	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/subsystemMP"
-	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/subsystemRND"
-	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/subsystemSM"
-	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/subsystemTX"
-	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/subsystemVM"
 	"github.com/iotaledger/wasp/packages/chain/dss"
 	"github.com/iotaledger/wasp/packages/cryptolib"
 	"github.com/iotaledger/wasp/packages/gpa"
@@ -102,11 +97,6 @@ const (
 	Skipped                      // Consensus reached, no TX should be posted for this LogIndex.
 )
 
-type StateRef struct {
-	AliasOutputID   *iotago.OutputID
-	StateCommitment *state.L1Commitment
-}
-
 type Output struct {
 	State      OutputState
 	Terminated bool
@@ -115,7 +105,8 @@ type Output struct {
 	NeedMempoolProposal       *isc.AliasOutputWithID // Requests for the mempool are needed for this Base Alias Output.
 	NeedMempoolRequests       []*isc.RequestRef      // Request payloads are needed from mempool for this IDs/Hash.
 	NeedStateMgrStateProposal *isc.AliasOutputWithID // Query for a proposal for Virtual State (it will go to the batch proposal).
-	NeedStateMgrDecidedState  *StateRef              // Query for a decided Virtual State to be used by VM.
+	NeedStateMgrDecidedState  *isc.AliasOutputWithID // Query for a decided Virtual State to be used by VM.
+	NeedStateMgrSaveBlock     state.Block            // Ask StateMgr to save the produced block.
 	NeedVMResult              *vm.VMTask             // VM Result is needed for this (agreed) batch.
 	//
 	// Following is the final result.
@@ -137,14 +128,14 @@ type consImpl struct {
 	asGPA          gpa.GPA
 	dss            dss.DSS
 	acs            acs.ACS
-	subMP          *subsystemMP.SubsystemMP   // Mempool.
-	subSM          *subsystemSM.SubsystemSM   // StateMgr.
-	subDSS         *subsystemDSS.SubsystemDSS // Distributed Schnorr Signature.
-	subACS         *subsystemACS.SubsystemACS // Asynchronous Common Subset.
-	subRND         *subsystemRND.SubsystemRND // Randomness.
-	subVM          *subsystemVM.SubsystemVM   // Virtual Machine.
-	subTX          *subsystemTX.SubsystemTX   // Building final TX.
-	term           *termCondition             // To detect, when this instance can be terminated.
+	subMP          SyncMP         // Mempool.
+	subSM          SyncSM         // StateMgr.
+	subDSS         SyncDSS        // Distributed Schnorr Signature.
+	subACS         SyncACS        // Asynchronous Common Subset.
+	subRND         SyncRND        // Randomness.
+	subVM          SyncVM         // Virtual Machine.
+	subTX          SyncTX         // Building final TX.
+	term           *termCondition // To detect, when this instance can be terminated.
 	msgWrapper     *gpa.MsgWrapper
 	output         *Output
 	log            *logger.Logger
@@ -214,39 +205,41 @@ func New(
 	}
 	c.asGPA = gpa.NewOwnHandler(me, c)
 	c.msgWrapper = gpa.NewMsgWrapper(msgTypeWrapped, c.msgWrapperFunc)
-	c.subMP = subsystemMP.New(
+	c.subMP = NewSyncMP(
 		c.uponMPProposalInputsReady,
 		c.uponMPProposalReceived,
 		c.uponMPRequestsNeeded,
 		c.uponMPRequestsReceived,
 	)
-	c.subSM = subsystemSM.New(
+	c.subSM = NewSyncSM(
 		c.uponSMStateProposalQueryInputsReady,
 		c.uponSMStateProposalReceived,
 		c.uponSMDecidedStateQueryInputsReady,
 		c.uponSMDecidedStateReceived,
+		c.uponSMSaveProducedBlockInputsReady,
+		c.uponSMSaveProducedBlockDone,
 	)
-	c.subDSS = subsystemDSS.New(
+	c.subDSS = NewSyncDSS(
 		c.uponDSSInitialInputsReady,
 		c.uponDSSIndexProposalReady,
 		c.uponDSSSigningInputsReceived,
 		c.uponDSSOutputReady,
 	)
-	c.subACS = subsystemACS.New(
+	c.subACS = NewSyncACS(
 		c.uponACSInputsReceived,
 		c.uponACSOutputReceived,
 		c.uponACSTerminated,
 	)
-	c.subRND = subsystemRND.New(
+	c.subRND = NewSyncRND(
 		int(dkShare.BLSThreshold()),
 		c.uponRNDInputsReady,
 		c.uponRNDSigSharesReady,
 	)
-	c.subVM = subsystemVM.New(
+	c.subVM = NewSyncVM(
 		c.uponVMInputsReceived,
 		c.uponVMOutputReceived,
 	)
-	c.subTX = subsystemTX.New(
+	c.subTX = NewSyncTX(
 		c.uponTXInputsReady,
 	)
 	c.term = newTermCondition(
@@ -297,7 +290,9 @@ func (c *consImpl) Message(msg gpa.Message) gpa.OutMessages {
 	case *msgStateMgrProposalConfirmed:
 		return c.subSM.StateProposalConfirmedByStateMgr()
 	case *msgStateMgrDecidedVirtualState:
-		return c.subSM.DecidedVirtualStateReceived(msgT.aliasOutput, msgT.stateBaseline, msgT.virtualStateAccess)
+		return c.subSM.DecidedVirtualStateReceived(msgT.stateBaseline, msgT.virtualStateAccess)
+	case *msgStateMgrBlockSaved:
+		return c.subSM.BlockSaved()
 	case *msgTimeData:
 		return c.subACS.TimeDataReceived(msgT.timeData)
 	case *msgBLSPartialSig:
@@ -374,14 +369,24 @@ func (c *consImpl) uponSMStateProposalReceived(proposedAliasOutput *isc.AliasOut
 	return c.subACS.StateProposalReceived(proposedAliasOutput)
 }
 
-func (c *consImpl) uponSMDecidedStateQueryInputsReady(decidedBaseAliasOutputID *iotago.OutputID, decidedBaseStateCommitment *state.L1Commitment) gpa.OutMessages {
-	c.output.NeedStateMgrDecidedState = &StateRef{decidedBaseAliasOutputID, decidedBaseStateCommitment}
+func (c *consImpl) uponSMDecidedStateQueryInputsReady(decidedBaseAliasOutput *isc.AliasOutputWithID) gpa.OutMessages {
+	c.output.NeedStateMgrDecidedState = decidedBaseAliasOutput
 	return nil
 }
 
-func (c *consImpl) uponSMDecidedStateReceived(aliasOutput *isc.AliasOutputWithID, stateBaseline coreutil.StateBaseline, virtualStateAccess state.VirtualStateAccess) gpa.OutMessages {
+func (c *consImpl) uponSMDecidedStateReceived(stateBaseline coreutil.StateBaseline, virtualStateAccess state.VirtualStateAccess) gpa.OutMessages {
 	c.output.NeedStateMgrDecidedState = nil
-	return c.subVM.DecidedStateReceived(aliasOutput, stateBaseline, virtualStateAccess)
+	return c.subVM.DecidedStateReceived(stateBaseline, virtualStateAccess)
+}
+
+func (c *consImpl) uponSMSaveProducedBlockInputsReady(producedBlock state.Block) gpa.OutMessages {
+	c.output.NeedStateMgrSaveBlock = producedBlock
+	return nil
+}
+
+func (c *consImpl) uponSMSaveProducedBlockDone() gpa.OutMessages {
+	c.output.NeedStateMgrSaveBlock = nil
+	return c.subTX.BlockSaved()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -401,8 +406,8 @@ func (c *consImpl) uponDSSIndexProposalReady(indexProposal []int) gpa.OutMessage
 	return c.subACS.DSSIndexProposalReceived(indexProposal)
 }
 
-func (c *consImpl) uponDSSSigningInputsReceived(sub *subsystemDSS.SubsystemDSS) gpa.OutMessages {
-	dssMsg := c.dss.NewMsgDecided(sub.DecidedIndexProposals, sub.MessageToSign)
+func (c *consImpl) uponDSSSigningInputsReceived(decidedIndexProposals map[gpa.NodeID][]int, messageToSign []byte) gpa.OutMessages {
+	dssMsg := c.dss.NewMsgDecided(decidedIndexProposals, messageToSign)
 	subDSS, subMsgs, err := c.msgWrapper.DelegateMessage(gpa.NewWrappingMsg(msgTypeWrapped, subsystemTypeDSS, 0, dssMsg))
 	if err != nil {
 		panic(xerrors.Errorf("cannot provide inputs for signing: %w", err))
@@ -419,14 +424,14 @@ func (c *consImpl) uponDSSOutputReady(signature []byte) gpa.OutMessages {
 ////////////////////////////////////////////////////////////////////////////////
 // ACS
 
-func (c *consImpl) uponACSInputsReceived(sub *subsystemACS.SubsystemACS) gpa.OutMessages {
+func (c *consImpl) uponACSInputsReceived(baseAliasOutput *isc.AliasOutputWithID, requestRefs []*isc.RequestRef, dssIndexProposal []int, timeData time.Time) gpa.OutMessages {
 	batchProposal := bp.NewBatchProposal(
 		*c.dkShare.GetIndex(),
-		sub.BaseAliasOutput,
-		util.NewFixedSizeBitVector(int(c.dkShare.GetN())).SetBits(sub.DSSIndexProposal),
-		sub.TimeData,
+		baseAliasOutput,
+		util.NewFixedSizeBitVector(int(c.dkShare.GetN())).SetBits(dssIndexProposal),
+		timeData,
 		isc.NewContractAgentID(&c.chainID, 0),
-		sub.RequestRefs,
+		requestRefs,
 	)
 	subACS, subMsgs, err := c.msgWrapper.DelegateInput(subsystemTypeACS, 0, batchProposal.Bytes())
 	if err != nil {
@@ -446,11 +451,11 @@ func (c *consImpl) uponACSOutputReceived(outputValues map[gpa.NodeID][]byte) gpa
 		c.term.haveOutputProduced()
 		return nil
 	}
-	baoID := *aggr.DecidedBaseAliasOutputID()
-	bSCmt := aggr.DecidedBaseStateCommitment()
+	bao := aggr.DecidedBaseAliasOutput()
+	baoID := bao.OutputID()
 	return gpa.NoMessages().
 		AddAll(c.subMP.RequestsNeeded(aggr.DecidedRequestRefs())).
-		AddAll(c.subSM.DecidedVirtualStateNeeded(&baoID, bSCmt)).
+		AddAll(c.subSM.DecidedVirtualStateNeeded(bao)).
 		AddAll(c.subVM.DecidedBatchProposalsReceived(aggr)).
 		AddAll(c.subRND.CanProceed(baoID[:])).
 		AddAll(c.subDSS.DecidedIndexProposalsReceived(aggr.DecidedDSSIndexProposals()))
@@ -491,23 +496,23 @@ func (c *consImpl) uponRNDSigSharesReady(dataToSign []byte, partialSigs map[gpa.
 ////////////////////////////////////////////////////////////////////////////////
 // VM
 
-func (c *consImpl) uponVMInputsReceived(sub *subsystemVM.SubsystemVM) gpa.OutMessages {
+func (c *consImpl) uponVMInputsReceived(aggregatedProposals *bp.AggregatedBatchProposals, stateBaseline coreutil.StateBaseline, virtualStateAccess state.VirtualStateAccess, randomness *hashing.HashValue, requests []isc.Request) gpa.OutMessages {
 	// The decided base alias output can be different from that we have proposed!
-	decidedBaseAliasOutputID := sub.AggregatedProposals.DecidedBaseAliasOutputID()
+	decidedBaseAliasOutput := aggregatedProposals.DecidedBaseAliasOutput()
 	c.output.NeedVMResult = &vm.VMTask{
 		ACSSessionID:           0, // TODO: Remove the ACSSessionID when old consensus Impl is removed.
 		Processors:             c.processorCache,
-		AnchorOutput:           sub.BaseAliasOutput.GetAliasOutput(),
-		AnchorOutputID:         *decidedBaseAliasOutputID,
-		SolidStateBaseline:     sub.StateBaseline,
-		Requests:               sub.AggregatedProposals.OrderedRequests(sub.Requests, *sub.Randomness),
-		TimeAssumption:         sub.AggregatedProposals.AggregatedTime(),
-		Entropy:                *sub.Randomness,
-		ValidatorFeeTarget:     sub.AggregatedProposals.ValidatorFeeTarget(),
+		AnchorOutput:           decidedBaseAliasOutput.GetAliasOutput(),
+		AnchorOutputID:         decidedBaseAliasOutput.OutputID(),
+		SolidStateBaseline:     stateBaseline,
+		Requests:               aggregatedProposals.OrderedRequests(requests, *randomness),
+		TimeAssumption:         aggregatedProposals.AggregatedTime(),
+		Entropy:                *randomness,
+		ValidatorFeeTarget:     aggregatedProposals.ValidatorFeeTarget(),
 		EstimateGasMode:        false,
 		EnableGasBurnLogging:   false,
-		VirtualStateAccess:     sub.VirtualStateAccess.Copy(),
-		MaintenanceModeEnabled: governance.NewStateAccess(sub.VirtualStateAccess.KVStore()).GetMaintenanceStatus(),
+		VirtualStateAccess:     virtualStateAccess.Copy(),
+		MaintenanceModeEnabled: governance.NewStateAccess(virtualStateAccess.KVStore()).GetMaintenanceStatus(),
 		Log:                    c.log.Named("VM"),
 	}
 	return nil
@@ -526,7 +531,12 @@ func (c *consImpl) uponVMOutputReceived(vmResult *vm.VMTask) gpa.OutMessages {
 	if err != nil {
 		panic(xerrors.Errorf("uponVMOutputReceived: cannot obtain signing message: %v", err))
 	}
+	producedBlock, err := vmResult.VirtualStateAccess.ExtractBlock()
+	if err != nil {
+		panic(xerrors.Errorf("uponVMOutputReceived: cannot extract produced block: %v", err))
+	}
 	return gpa.NoMessages().
+		AddAll(c.subSM.BlockProduced(producedBlock)).
 		AddAll(c.subTX.VMResultReceived(vmResult)).
 		AddAll(c.subDSS.MessageToSignReceived(signingMsg))
 }
@@ -535,8 +545,7 @@ func (c *consImpl) uponVMOutputReceived(vmResult *vm.VMTask) gpa.OutMessages {
 // TX
 
 // Everything is ready for the output TX, produce it.
-func (c *consImpl) uponTXInputsReady(sub *subsystemTX.SubsystemTX) gpa.OutMessages {
-	vmResult := sub.VMResult
+func (c *consImpl) uponTXInputsReady(vmResult *vm.VMTask, signature []byte) gpa.OutMessages {
 	var resultTxEssence *iotago.TransactionEssence
 	var resultState state.VirtualStateAccess
 	if vmResult.RotationAddress != nil {
@@ -565,7 +574,7 @@ func (c *consImpl) uponTXInputsReady(sub *subsystemTX.SubsystemTX) gpa.OutMessag
 	}
 	publicKey := c.dkShare.GetSharedPublic()
 	var signatureArray [ed25519.SignatureSize]byte
-	copy(signatureArray[:], sub.Signature)
+	copy(signatureArray[:], signature)
 	signatureForUnlock := &iotago.Ed25519Signature{
 		PublicKey: publicKey.AsKey(),
 		Signature: signatureArray,
