@@ -26,30 +26,36 @@ func NewGetBlockMessage(blockIndex uint32, blockHash state.BlockHash, to gpa.Nod
 }
 
 func NewGetBlockMessageFromBytes(data []byte) (*GetBlockMessage, error) {
-	if data[0] != MsgTypeGetBlockMessage {
-		return nil, fmt.Errorf("Error creating get block message from bytes: wrong message type %v", data[0])
-	}
-	// TODO: temporar code. Remove it after DB is refactored.
-	if len(data) < 5 {
-		return nil, fmt.Errorf("Error creating get block message from bytes: wrong size %v, expecting 5 or more", len(data))
-	}
-	blockIndex, err := util.Uint32From4Bytes(data[1:5])
-	if err != nil {
-		return nil, err
-	}
-	// End of temporar code
-	actualData := data[5:] //data[1:]
-	if len(actualData) != state.BlockHashSize {
-		return nil, fmt.Errorf("Error creating get block message from bytes: wrong size %v, expecting %v", len(actualData), state.BlockHashSize)
-	}
-	var blockHash state.BlockHash
-	copy(blockHash[:], actualData)
-	return NewGetBlockMessage(blockIndex, blockHash, "UNKNOWN"), nil
+	result := NewGetBlockMessage(0, state.BlockHash{}, "UNKNOWN") // NOTE: `blockIndex` and `blockHash` will be set in `UnmarshalBinary` method
+	err := result.UnmarshalBinary(data)
+	return result, err
 }
 
 func (gbmT *GetBlockMessage) MarshalBinary() (data []byte, err error) {
 	result := append([]byte{MsgTypeGetBlockMessage}, util.Uint32To4Bytes(gbmT.blockIndex)...)
 	return append(result, gbmT.blockHash[:]...), nil
+}
+
+func (gbmT *GetBlockMessage) UnmarshalBinary(data []byte) error {
+	if data[0] != MsgTypeGetBlockMessage {
+		return fmt.Errorf("Error creating get block message from bytes: wrong message type %v", data[0])
+	}
+	// TODO: temporar code. Remove it after DB is refactored.
+	if len(data) < 5 {
+		return fmt.Errorf("Error creating get block message from bytes: wrong size %v, expecting 5 or more", len(data))
+	}
+	var err error
+	gbmT.blockIndex, err = util.Uint32From4Bytes(data[1:5])
+	if err != nil {
+		return err
+	}
+	// End of temporar code
+	actualData := data[5:] //data[1:]
+	if len(actualData) != state.BlockHashSize {
+		return fmt.Errorf("Error creating get block message from bytes: wrong size %v, expecting %v", len(actualData), state.BlockHashSize)
+	}
+	copy(gbmT.blockHash[:], actualData)
+	return nil
 }
 
 func (gbmT *GetBlockMessage) GetBlockHash() state.BlockHash {
