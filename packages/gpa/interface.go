@@ -18,6 +18,7 @@ func (niT NodeID) String() string {
 
 type Message interface {
 	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
 	Recipient() NodeID // The sender should indicate the recipient.
 	SetSender(NodeID)  // The transport later will set a validated sender for a message.
 }
@@ -83,12 +84,10 @@ type OutMessages interface {
 
 // Generic interface for functional style distributed algorithms.
 // GPA stands for Generic Pure Algorithm.
-//
-// TODO: Use Input(-) for all the internal messages in all algorithms.
 type GPA interface {
 	Input(inp Input) OutMessages     // Can return nil for NoMessages.
 	Message(msg Message) OutMessages // Can return nil for NoMessages.
 	Output() Output
-	StatusString() string                          // Status of the protocol as a string.
-	UnmarshalMessage(data []byte) (Message, error) // TODO: Drop from this interface.
+	StatusString() string // Status of the protocol as a string.
+	UnmarshalMessage(data []byte) (Message, error)
 }

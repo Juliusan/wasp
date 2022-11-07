@@ -49,7 +49,6 @@
 //
 // TODO: Handle the requests gracefully in the VM before getting the initTX.
 // TODO: Reconsider the termination. Do we need to wait for DSS, RND?
-// TODO: Add BaseAliasOutput to the BatchProposal to avoid having it in the StateMgr.
 package cons
 
 import (
@@ -270,11 +269,26 @@ func (c *consImpl) AsGPA() gpa.GPA {
 }
 
 func (c *consImpl) Input(input gpa.Input) gpa.OutMessages {
-	if baseAliasOutput, ok := input.(*isc.AliasOutputWithID); ok {
+	switch input := input.(type) {
+	case *inputProposal:
 		return gpa.NoMessages().
-			AddAll(c.subMP.BaseAliasOutputReceived(baseAliasOutput)).
-			AddAll(c.subSM.ProposedBaseAliasOutputReceived(baseAliasOutput)).
+			AddAll(c.subMP.BaseAliasOutputReceived(input.baseAliasOutput)).
+			AddAll(c.subSM.ProposedBaseAliasOutputReceived(input.baseAliasOutput)).
 			AddAll(c.subDSS.InitialInputReceived())
+	case *inputMempoolProposal:
+		return c.subMP.ProposalReceived(input.requestRefs)
+	case *inputMempoolRequests:
+		return c.subMP.RequestsReceived(input.requests)
+	case *inputStateMgrProposalConfirmed:
+		return c.subSM.StateProposalConfirmedByStateMgr()
+	case *inputStateMgrDecidedVirtualState:
+		return c.subSM.DecidedVirtualStateReceived(input.stateBaseline, input.virtualStateAccess)
+	case *inputStateMgrBlockSaved:
+		return c.subSM.BlockSaved()
+	case *inputTimeData:
+		return c.subACS.TimeDataReceived(input.timeData)
+	case *inputVMResult:
+		return c.subVM.VMResultReceived(input.task)
 	}
 	panic(xerrors.Errorf("unexpected input: %v", input))
 }
@@ -283,22 +297,8 @@ func (c *consImpl) Input(input gpa.Input) gpa.OutMessages {
 // Here we route all the messages.
 func (c *consImpl) Message(msg gpa.Message) gpa.OutMessages {
 	switch msgT := msg.(type) {
-	case *msgMempoolProposal:
-		return c.subMP.ProposalReceived(msgT.requestRefs)
-	case *msgMempoolRequests:
-		return c.subMP.RequestsReceived(msgT.requests)
-	case *msgStateMgrProposalConfirmed:
-		return c.subSM.StateProposalConfirmedByStateMgr()
-	case *msgStateMgrDecidedVirtualState:
-		return c.subSM.DecidedVirtualStateReceived(msgT.stateBaseline, msgT.virtualStateAccess)
-	case *msgStateMgrBlockSaved:
-		return c.subSM.BlockSaved()
-	case *msgTimeData:
-		return c.subACS.TimeDataReceived(msgT.timeData)
 	case *msgBLSPartialSig:
 		return c.subRND.BLSPartialSigReceived(msgT.sender, msgT.partialSig)
-	case *msgVMResult:
-		return c.subVM.VMResultReceived(msgT.task)
 	case *gpa.WrappingMsg:
 		sub, subMsgs, err := c.msgWrapper.DelegateMessage(msgT)
 		if err != nil {
@@ -393,7 +393,7 @@ func (c *consImpl) uponSMSaveProducedBlockDone() gpa.OutMessages {
 // DSS
 
 func (c *consImpl) uponDSSInitialInputsReady() gpa.OutMessages {
-	sub, subMsgs, err := c.msgWrapper.DelegateInput(subsystemTypeDSS, 0, nil)
+	sub, subMsgs, err := c.msgWrapper.DelegateInput(subsystemTypeDSS, 0, dss.NewInputStart())
 	if err != nil {
 		panic(xerrors.Errorf("cannot provide input to DSS: %w", err))
 	}
@@ -407,8 +407,8 @@ func (c *consImpl) uponDSSIndexProposalReady(indexProposal []int) gpa.OutMessage
 }
 
 func (c *consImpl) uponDSSSigningInputsReceived(decidedIndexProposals map[gpa.NodeID][]int, messageToSign []byte) gpa.OutMessages {
-	dssMsg := c.dss.NewMsgDecided(decidedIndexProposals, messageToSign)
-	subDSS, subMsgs, err := c.msgWrapper.DelegateMessage(gpa.NewWrappingMsg(msgTypeWrapped, subsystemTypeDSS, 0, dssMsg))
+	dssDecidedInput := dss.NewInputDecided(decidedIndexProposals, messageToSign)
+	subDSS, subMsgs, err := c.msgWrapper.DelegateInput(subsystemTypeDSS, 0, dssDecidedInput)
 	if err != nil {
 		panic(xerrors.Errorf("cannot provide inputs for signing: %w", err))
 	}
