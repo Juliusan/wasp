@@ -6,7 +6,6 @@ package smUtils
 import (
 	"fmt"
 	"math/rand"
-	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -36,17 +35,13 @@ func MakeNodeIDs(indexes []int) []gpa.NodeID {
 	return result
 }
 
-func GetBlocks(t *testing.T, count int, branchingFactor int) (*isc.ChainID, []state.Block, []*isc.AliasOutputWithID) {
+func GetOriginState(t require.TestingT) (*isc.ChainID, *isc.AliasOutputWithID, state.VirtualStateAccess) {
 	store := mapdb.NewMapDB()
 	aliasOutput0ID := iotago.OutputIDFromTransactionIDAndIndex(getRandomTxID(), 0).UTXOInput()
 	chainID := isc.ChainIDFromAliasID(iotago.AliasIDFromOutputID(aliasOutput0ID.ID()))
 	originVS, err := state.CreateOriginState(store, &chainID)
 	require.NoError(t, err)
-	result := make([]state.Block, count+1)
-	vStates := make([]state.VirtualStateAccess, len(result))
-	vStates[0] = originVS
 	stateAddress := cryptolib.NewKeyPair().GetPublicKey().AsEd25519Address()
-	aliasOutputs := make([]*isc.AliasOutputWithID, len(result))
 	aliasOutput0 := &iotago.AliasOutput{
 		Amount:        tpkg.TestTokenSupply,
 		AliasID:       *chainID.AsAliasID(), // NOTE: not very correct: origin output's AliasID should be empty; left here to make mocking transitions easier
@@ -61,17 +56,26 @@ func GetBlocks(t *testing.T, count int, branchingFactor int) (*isc.ChainID, []st
 			},
 		},
 	}
-	aliasOutputs[0] = isc.NewAliasOutputWithID(aliasOutput0, aliasOutput0ID)
+	return &chainID, isc.NewAliasOutputWithID(aliasOutput0, aliasOutput0ID), originVS
+}
+
+func GetBlocks(t require.TestingT, count, branchingFactor int) (*isc.ChainID, []state.Block, []*isc.AliasOutputWithID) {
+	chainID, aliasOutput0, originVS := GetOriginState(t)
+	result := make([]state.Block, count+1)
+	vStates := make([]state.VirtualStateAccess, len(result))
+	vStates[0] = originVS
+	aliasOutputs := make([]*isc.AliasOutputWithID, len(result))
+	aliasOutputs[0] = aliasOutput0
 	for i := 1; i < len(result); i++ {
 		baseIndex := (i + branchingFactor - 2) / branchingFactor
 		increment := uint64(1 + i%branchingFactor)
-		result[i], aliasOutputs[i], vStates[i] = nextState(t, vStates[baseIndex], aliasOutputs[baseIndex], increment)
+		result[i], aliasOutputs[i], vStates[i] = GetNextState(t, vStates[baseIndex], aliasOutputs[baseIndex], increment)
 	}
-	return &chainID, result[1:], aliasOutputs[1:]
+	return chainID, result[1:], aliasOutputs[1:]
 }
 
-func nextState(
-	t *testing.T,
+func GetNextState(
+	t require.TestingT,
 	vs state.VirtualStateAccess,
 	consumedAliasOutputWithID *isc.AliasOutputWithID,
 	incrementOpt ...uint64,
