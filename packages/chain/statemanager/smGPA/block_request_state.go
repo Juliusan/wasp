@@ -1,47 +1,75 @@
 package smGPA
 
 import (
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smInputs"
 	"github.com/iotaledger/wasp/packages/state"
 )
 
 type stateBlockRequest struct { // Abstract struct for requests to obtain certain virtual state;
-	implementation stateBlockRequestImplementation
+	lastBlockHash  state.BlockHash
+	lastBlockIndex uint32 // TODO: temporar field. Remove it after DB refactoring.
+	priority       uint32
 	done           bool
 	blocks         []state.Block
+	isValidFun     isValidFun
+	respondFun     respondFun
 }
 
-type stateBlockRequestImplementation interface { // Abstract methods of struct stateBlockRequest
-	isImplementationValid() bool
-	respond([]state.Block, state.VirtualStateAccess) // TODO: blocks parameter should probably be removed after DB refactoring
-}
+type isValidFun func() bool
+type respondFun func([]state.Block, state.VirtualStateAccess) // TODO: blocks parameter should probably be removed after DB refactoring
 
 var _ blockRequest = &stateBlockRequest{}
 
-func newStateBlockRequest(sbri stateBlockRequestImplementation) *stateBlockRequest {
+func newStateBlockRequestTemplate() *stateBlockRequest {
 	return &stateBlockRequest{
-		implementation: sbri,
-		done:           false,
-		blocks:         make([]state.Block, 0),
+		done:   false,
+		blocks: make([]state.Block, 0),
 	}
 }
 
+func newStateBlockRequestFromConsensus(input *smInputs.ConsensusDecidedState) *stateBlockRequest {
+	result := newStateBlockRequestTemplate()
+	result.lastBlockHash = input.GetStateCommitment().BlockHash
+	result.lastBlockIndex = input.GetBlockIndex()
+	result.priority = topPriority
+	result.isValidFun = func() bool {
+		return input.IsValid()
+	}
+	result.respondFun = func(_ []state.Block, vState state.VirtualStateAccess) {
+		input.Respond(vState)
+	}
+	return result
+}
+
+func newStateBlockRequestLocal(bi uint32, bh state.BlockHash, priority uint32, respondFun respondFun) *stateBlockRequest {
+	result := newStateBlockRequestTemplate()
+	result.lastBlockHash = bh
+	result.lastBlockIndex = bi
+	result.priority = priority
+	result.isValidFun = func() bool {
+		return true
+	}
+	result.respondFun = respondFun
+	return result
+}
+
 func (sbrT *stateBlockRequest) getLastBlockHash() state.BlockHash {
-	panic("Abstract method, should be overridden")
+	return sbrT.lastBlockHash
 }
 
 func (sbrT *stateBlockRequest) getLastBlockIndex() uint32 { // TODO: temporar function. Remove it after DB refactoring.
-	panic("Abstract method, should be overridden")
+	return sbrT.lastBlockIndex
 }
 
 func (sbrT *stateBlockRequest) isValid() bool {
 	if sbrT.done {
 		return false
 	}
-	return sbrT.implementation.isImplementationValid()
+	return sbrT.isValidFun()
 }
 
 func (sbrT *stateBlockRequest) getPriority() uint32 {
-	panic("Abstract method, should be overridden")
+	return sbrT.priority
 }
 
 func (sbrT *stateBlockRequest) blockAvailable(block state.Block) {
@@ -72,6 +100,6 @@ func (sbrT *stateBlockRequest) markCompleted(createBaseStateFun createStateFun) 
 			}
 			vState.Commit() // TODO: is it needed
 		}
-		sbrT.implementation.respond(sbrT.blocks, vState)
+		sbrT.respondFun(sbrT.blocks, vState)
 	}
 }
