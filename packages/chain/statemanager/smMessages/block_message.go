@@ -8,7 +8,7 @@ import (
 )
 
 type BlockMessage struct {
-	*GpaMessage
+	gpa.BasicMessage
 	block state.Block
 }
 
@@ -16,8 +16,8 @@ var _ gpa.Message = &BlockMessage{}
 
 func NewBlockMessage(block state.Block, to gpa.NodeID) *BlockMessage {
 	return &BlockMessage{
-		GpaMessage: newGPAMessage(to),
-		block:      block,
+		BasicMessage: gpa.NewBasicMessage(to),
+		block:        block,
 	}
 }
 

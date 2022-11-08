@@ -9,7 +9,7 @@ import (
 )
 
 type GetBlockMessage struct {
-	*GpaMessage
+	gpa.BasicMessage
 	blockHash  state.BlockHash
 	blockIndex uint32 // TODO: temporar field. Remove it after DB is refactored.
 }
@@ -19,9 +19,9 @@ var _ gpa.Message = &GetBlockMessage{}
 // TODO: `blockIndex` is a temporar parameter. Remove it after DB is refactored.
 func NewGetBlockMessage(blockIndex uint32, blockHash state.BlockHash, to gpa.NodeID) *GetBlockMessage {
 	return &GetBlockMessage{
-		GpaMessage: newGPAMessage(to),
-		blockHash:  blockHash,
-		blockIndex: blockIndex,
+		BasicMessage: gpa.NewBasicMessage(to),
+		blockHash:    blockHash,
+		blockIndex:   blockIndex,
 	}
 }
 

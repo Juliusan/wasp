@@ -136,9 +136,9 @@ func (smT *stateManagerGPA) Input(input gpa.Input) gpa.OutMessages {
 func (smT *stateManagerGPA) Message(msg gpa.Message) gpa.OutMessages {
 	switch msgCasted := msg.(type) {
 	case *smMessages.GetBlockMessage:
-		return smT.handlePeerGetBlock(msgCasted.GetSender(), msgCasted.GetBlockIndex(), msgCasted.GetBlockHash())
+		return smT.handlePeerGetBlock(msgCasted.Sender(), msgCasted.GetBlockIndex(), msgCasted.GetBlockHash())
 	case *smMessages.BlockMessage:
-		return smT.handlePeerBlock(msgCasted.GetSender(), msgCasted.GetBlock())
+		return smT.handlePeerBlock(msgCasted.Sender(), msgCasted.GetBlock())
 	default:
 		smT.log.Warnf("Unknown message received, ignoring it: type=%T, message=%v", msg, msg)
 		return gpa.NoMessages()
