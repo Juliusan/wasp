@@ -130,7 +130,7 @@ func (smT *stateManagerGPA) Input(input gpa.Input) gpa.OutMessages {
 		return smT.handleStateManagerTimerTick(inputCasted.GetTime())
 	default:
 		smT.log.Warnf("Unknown input received, ignoring it: type=%T, message=%v", input, input)
-		return gpa.NoMessages()
+		return nil // No messages to send
 	}
 }
 
@@ -142,7 +142,7 @@ func (smT *stateManagerGPA) Message(msg gpa.Message) gpa.OutMessages {
 		return smT.handlePeerBlock(msgCasted.Sender(), msgCasted.GetBlock())
 	default:
 		smT.log.Warnf("Unknown message received, ignoring it: type=%T, message=%v", msg, msg)
-		return gpa.NoMessages()
+		return nil // No messages to send
 	}
 }
 
@@ -177,7 +177,7 @@ func (smT *stateManagerGPA) handlePeerGetBlock(from gpa.NodeID, blockIndex uint3
 	smT.log.Debugf("Message received from peer %s: request to get block %s", from, blockHash)
 	block := smT.blockCache.GetBlock(blockIndex, blockHash)
 	if block == nil {
-		return gpa.NoMessages()
+		return nil // No messages to send
 	}
 	return gpa.NoMessages().Add(smMessages.NewBlockMessage(block, from))
 }
@@ -186,7 +186,7 @@ func (smT *stateManagerGPA) handlePeerBlock(from gpa.NodeID, block state.Block) 
 	smT.log.Debugf("Message received from peer %s: block %s", from, block.GetHash())
 	_, ok := smT.blockRequests[block.GetHash()]
 	if !ok {
-		return gpa.NoMessages()
+		return nil // No messages to send
 	}
 	messages, _ := smT.handleGeneralBlock(block)
 	return messages
@@ -202,12 +202,12 @@ func (smT *stateManagerGPA) handleChainBlockProduced(input *smInputs.ChainBlockP
 func (smT *stateManagerGPA) handleGeneralBlock(block state.Block) (gpa.OutMessages, error) {
 	err := smT.blockCache.AddBlock(block)
 	if err != nil {
-		return gpa.NoMessages(), err
+		return nil, err // No messages to send
 	}
 	blockHash := block.GetHash()
 	requests, ok := smT.blockRequests[blockHash]
 	if !ok {
-		return gpa.NoMessages(), nil
+		return nil, nil // No messages to send
 	}
 	delete(smT.blockRequests, blockHash)
 	delete(smT.blockIndexes, blockHash)
@@ -223,7 +223,7 @@ func (smT *stateManagerGPA) handleChainReceiveConfirmedAliasOutput(aliasOutput *
 	stateCommitment, err := state.L1CommitmentFromAliasOutput(aliasOutput.GetAliasOutput())
 	if err != nil {
 		smT.log.Errorf("Error retrieving state commitment from alias output %s: %v", aliasOutputID, err)
-		return gpa.NoMessages()
+		return nil // No messages to send
 	}
 	request := newLocalStateBlockRequest(aliasOutput.GetStateIndex(), stateCommitment.BlockHash, seq, func(blocks []state.Block, vs state.VirtualStateAccess) {
 		smT.log.Debugf("Virtual state for alias output %s (%v-th in state manager) is ready", aliasOutputID, seq)
@@ -260,7 +260,7 @@ func (smT *stateManagerGPA) handleConsensusStateProposal(csp *smInputs.Consensus
 	request, err := newConsensusStateProposalBlockRequest(csp)
 	if err != nil {
 		smT.log.Errorf("Error creating consensus state proposal block request: %v", err)
-		return gpa.NoMessages()
+		return nil // No messages to send
 	}
 	return smT.traceBlockChainByRequest(request)
 }
@@ -339,7 +339,7 @@ func (smT *stateManagerGPA) traceBlockChain(block state.Block, requests ...block
 			request.markCompleted(func() (state.VirtualStateAccess, error) { return nil, nil })
 		}
 	}
-	return gpa.NoMessages()
+	return nil // No messages to send
 }
 
 func (smT *stateManagerGPA) traceBlockChainByRequest(request blockRequest) gpa.OutMessages {
