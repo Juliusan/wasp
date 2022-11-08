@@ -20,7 +20,7 @@ func TestGetRandomOtherNodeIDs(t *testing.T) {
 	nodeIDsToGet := 5
 	iterationCount := 13
 
-	nodeIDs := MakeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7}) // 7 nodes excluding self
+	nodeIDs := gpa.MakeTestNodeIDs("Node", 8) // 7 nodes and self
 	me := nodeIDs[meIndex]
 	randomiser := NewNodeRandomiser(me, nodeIDs, log)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs, me)
@@ -34,7 +34,7 @@ func TestGetRandomOtherNodeIDsToFew(t *testing.T) {
 	nodeIDsToGet := 5
 	iterationCount := 1
 
-	nodeIDs := MakeNodeIDs([]int{0, 1, 2, 3}) // 3 nodes excluding self
+	nodeIDs := gpa.MakeTestNodeIDs("Node", 4) // 3 nodes and self
 	me := nodeIDs[meIndex]
 	randomiser := NewNodeRandomiser(me, nodeIDs, log)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, 3, iterationCount, nodeIDs, me)
@@ -47,11 +47,12 @@ func TestGetRandomOtherNodeIDsAfterChanges(t *testing.T) {
 	nodeIDsToGet := 5
 	iterationCount := 7
 
-	nodeIDs0 := MakeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7})
-	nodeIDs1 := MakeNodeIDs([]int{0, 2, 3, 5, 6, 7})
-	nodeIDs2 := MakeNodeIDs([]int{0, 2, 3, 5, 6, 7, 8})
-	nodeIDs3 := MakeNodeIDs([]int{0, 2, 3, 5, 6, 7})
-	nodeIDs4 := MakeNodeIDs([]int{0, 2, 3, 4, 5, 6, 7, 9})
+	nib := gpa.MakeTestNodeIDs("Node", 10) // nodeIDsBase
+	nodeIDs0 := []gpa.NodeID{nib[0], nib[1], nib[2], nib[3], nib[4], nib[5], nib[6], nib[7]}
+	nodeIDs1 := []gpa.NodeID{nib[0], nib[2], nib[3], nib[5], nib[6], nib[7]}
+	nodeIDs2 := []gpa.NodeID{nib[0], nib[2], nib[3], nib[5], nib[6], nib[7], nib[8]}
+	nodeIDs3 := []gpa.NodeID{nib[0], nib[2], nib[3], nib[5], nib[6], nib[7]}
+	nodeIDs4 := []gpa.NodeID{nib[0], nib[2], nib[3], nib[4], nib[5], nib[6], nib[7], nib[9]}
 	me := nodeIDs0[0]
 	randomiser := NewNodeRandomiser(me, nodeIDs0, log)
 	testGetRandomOtherNodeIDs(t, randomiser, nodeIDsToGet, nodeIDsToGet, iterationCount, nodeIDs0, me)

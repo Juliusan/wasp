@@ -28,7 +28,7 @@ func TestBasic(t *testing.T) {
 	defer log.Sync()
 
 	chainID, blocks, stateOutputs := smGPAUtils.GetBlocks(t, 8, 1)
-	nodeID := smUtils.MakeNodeID(0)
+	nodeID := gpa.MakeTestNodeIDs("Node", 1)[0]
 	_, sm := createStateManagerGpa(t, chainID, nodeID, []gpa.NodeID{nodeID}, log)
 	tc := gpa.NewTestContext(map[gpa.NodeID]gpa.GPA{nodeID: sm})
 	sendBlocksToNode(t, tc, nodeID, blocks)
@@ -55,7 +55,7 @@ func TestManyNodes(t *testing.T) {
 	smTimers.StateManagerGetBlockRetry = 100 * time.Millisecond
 
 	chainID, blocks, stateOutputs := smGPAUtils.GetBlocks(t, 16, 1)
-	nodeIDs := smUtils.MakeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9})
+	nodeIDs := gpa.MakeTestNodeIDs("Node", 10)
 	sms := make(map[gpa.NodeID]gpa.GPA)
 	for _, nodeID := range nodeIDs {
 		_, sm := createStateManagerGpa(t, chainID, nodeID, nodeIDs, log, smTimers)
@@ -119,7 +119,7 @@ func TestBlockCacheCleaningAuto(t *testing.T) {
 	smTimers.BlockCacheBlockCleaningPeriod = 70 * time.Millisecond
 
 	chainID, blocks, _ := smGPAUtils.GetBlocks(t, 6, 2)
-	nodeID := smUtils.MakeNodeID(0)
+	nodeID := gpa.MakeTestNodeIDs("Node", 1)[0]
 	_, sm := createStateManagerGpa(t, chainID, nodeID, []gpa.NodeID{nodeID}, log, smTimers)
 	var err error
 	smImpl := sm.(*stateManagerGPA)
