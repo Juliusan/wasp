@@ -25,10 +25,8 @@ func NewGetBlockMessage(blockIndex uint32, blockHash state.BlockHash, to gpa.Nod
 	}
 }
 
-func NewGetBlockMessageFromBytes(data []byte) (*GetBlockMessage, error) {
-	result := NewGetBlockMessage(0, state.BlockHash{}, "UNKNOWN") // NOTE: `blockIndex` and `blockHash` will be set in `UnmarshalBinary` method
-	err := result.UnmarshalBinary(data)
-	return result, err
+func NewEmptyGetBlockMessage() *GetBlockMessage { // `UnmarshalBinary` must be called afterwards
+	return NewGetBlockMessage(0, state.BlockHash{}, "UNKNOWN")
 }
 
 func (gbmT *GetBlockMessage) MarshalBinary() (data []byte, err error) {

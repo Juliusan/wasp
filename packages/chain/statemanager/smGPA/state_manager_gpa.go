@@ -158,14 +158,17 @@ func (smT *stateManagerGPA) UnmarshalMessage(data []byte) (gpa.Message, error) {
 	if len(data) < 1 {
 		return nil, fmt.Errorf("Error unmarshalling message: slice of length %v is too short", data)
 	}
+	var message gpa.Message
 	switch data[0] {
 	case smMessages.MsgTypeBlockMessage:
-		return smMessages.NewBlockMessageFromBytes(data)
+		message = smMessages.NewEmptyBlockMessage()
 	case smMessages.MsgTypeGetBlockMessage:
-		return smMessages.NewGetBlockMessageFromBytes(data)
+		message = smMessages.NewEmptyGetBlockMessage()
 	default:
 		return nil, fmt.Errorf("Error unmarshalling message: message type %v unknown", data[0])
 	}
+	err := message.UnmarshalBinary(data)
+	return message, err
 }
 
 // -------------------------------------

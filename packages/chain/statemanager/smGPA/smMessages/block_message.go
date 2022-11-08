@@ -21,10 +21,8 @@ func NewBlockMessage(block state.Block, to gpa.NodeID) *BlockMessage {
 	}
 }
 
-func NewBlockMessageFromBytes(data []byte) (*BlockMessage, error) {
-	result := NewBlockMessage(nil, "UNKNOWN") // NOTE: `block` will be set in `UnmarshalBinary` method
-	err := result.UnmarshalBinary(data)
-	return result, err
+func NewEmptyBlockMessage() *BlockMessage { // `UnmarshalBinary` must be called afterwards
+	return NewBlockMessage(nil, "UNKNOWN")
 }
 
 func (bmT *BlockMessage) MarshalBinary() (data []byte, err error) {
