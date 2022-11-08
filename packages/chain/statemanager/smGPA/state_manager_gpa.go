@@ -28,7 +28,7 @@ type stateManagerGPA struct {
 	store                   kvstore.KVStore
 	blockCache              smGPAUtils.BlockCache
 	blockRequests           map[state.BlockHash]([]blockRequest) //nolint:gocritic // removing brackets doesn't make code simpler or clearer
-	blockIndexes            map[state.BlockHash]uint32           // TODO: temporar field. Remove it after DB refactoring.
+	blockIndexes            map[state.BlockHash]uint32           // TODO: temporary field. Remove it after DB refactoring.
 	nodeRandomiser          smUtils.NodeRandomiser
 	solidState              state.VirtualStateAccess
 	solidStateBlockHash     state.BlockHash
@@ -175,7 +175,7 @@ func (smT *stateManagerGPA) UnmarshalMessage(data []byte) (gpa.Message, error) {
 // Internal functions
 // -------------------------------------
 
-// TODO: `blockIndex` is a temporar parameter.  Remove it after DB refactoring.
+// TODO: `blockIndex` is a temporary parameter. Remove it after DB refactoring.
 func (smT *stateManagerGPA) handlePeerGetBlock(from gpa.NodeID, blockIndex uint32, blockHash state.BlockHash) gpa.OutMessages {
 	smT.log.Debugf("Message received from peer %s: request to get block %s", from, blockHash)
 	block := smT.blockCache.GetBlock(blockIndex, blockHash)
@@ -355,7 +355,7 @@ func (smT *stateManagerGPA) traceBlockChainByRequest(request blockRequest) gpa.O
 	return smT.traceBlockChain(block, request)
 }
 
-// TODO: `blockIndex` is a temporar parameter. Remove it after DB refactoring.
+// TODO: `blockIndex` is a temporary parameter. Remove it after DB refactoring.
 func (smT *stateManagerGPA) getBlockOrRequestMessages(blockIndex uint32, blockHash state.BlockHash, requests ...blockRequest) (state.Block, gpa.OutMessages) {
 	block := smT.blockCache.GetBlock(blockIndex, blockHash)
 	if block == nil {
@@ -376,7 +376,7 @@ func (smT *stateManagerGPA) getBlockOrRequestMessages(blockIndex uint32, blockHa
 }
 
 // Make `numberOfNodesToRequestBlockFromConst` messages to random peers
-// TODO: `blockIndex` is a temporar parameter. Remove it after DB refactoring.
+// TODO: `blockIndex` is a temporary parameter. Remove it after DB refactoring.
 func (smT *stateManagerGPA) makeGetBlockRequestMessages(blockIndex uint32, blockHash state.BlockHash) gpa.OutMessages {
 	nodeIDs := smT.nodeRandomiser.GetRandomOtherNodeIDs(numberOfNodesToRequestBlockFromConst)
 	smT.log.Debugf("Requesting block %s from %v random nodes %v", blockHash, numberOfNodesToRequestBlockFromConst, nodeIDs)

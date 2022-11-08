@@ -29,7 +29,7 @@ func (cspbrT *consensusStateProposalBlockRequest) getLastBlockHash() state.Block
 	return cspbrT.lastBlockHash
 }
 
-func (cspbrT *consensusStateProposalBlockRequest) getLastBlockIndex() uint32 { // TODO: temporar function.  Remove it after DB refactoring.
+func (cspbrT *consensusStateProposalBlockRequest) getLastBlockIndex() uint32 { // TODO: temporary function. Remove it after DB refactoring.
 	return cspbrT.consensusStateProposal.GetAliasOutputWithID().GetStateIndex()
 }
 

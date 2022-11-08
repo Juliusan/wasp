@@ -5,9 +5,9 @@ import (
 	"github.com/iotaledger/wasp/packages/state"
 )
 
-type stateBlockRequest struct { // Abstract struct for requests to obtain certain virtual state;
+type stateBlockRequest struct {
 	lastBlockHash  state.BlockHash
-	lastBlockIndex uint32 // TODO: temporar field. Remove it after DB refactoring.
+	lastBlockIndex uint32 // TODO: temporary field. Remove it after DB refactoring.
 	priority       uint32
 	done           bool
 	blocks         []state.Block
@@ -16,6 +16,7 @@ type stateBlockRequest struct { // Abstract struct for requests to obtain certai
 }
 
 type isValidFun func() bool
+
 type respondFun func([]state.Block, state.VirtualStateAccess) // TODO: blocks parameter should probably be removed after DB refactoring
 
 var _ blockRequest = &stateBlockRequest{}
@@ -57,7 +58,7 @@ func (sbrT *stateBlockRequest) getLastBlockHash() state.BlockHash {
 	return sbrT.lastBlockHash
 }
 
-func (sbrT *stateBlockRequest) getLastBlockIndex() uint32 { // TODO: temporar function. Remove it after DB refactoring.
+func (sbrT *stateBlockRequest) getLastBlockIndex() uint32 { // TODO: temporary function. Remove it after DB refactoring.
 	return sbrT.lastBlockIndex
 }
 

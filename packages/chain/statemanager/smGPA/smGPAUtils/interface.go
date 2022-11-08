@@ -8,7 +8,7 @@ import (
 
 type BlockCache interface {
 	AddBlock(state.Block) error
-	GetBlock(uint32, state.BlockHash) state.Block // TODO: first parameter is temporar. Remove it after DB is refactored.
+	GetBlock(uint32, state.BlockHash) state.Block // TODO: first parameter is temporary. Remove it after DB is refactored.
 	CleanOlderThan(time.Time)
 }
 
