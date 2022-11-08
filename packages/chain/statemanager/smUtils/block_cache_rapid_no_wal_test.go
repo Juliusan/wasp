@@ -18,6 +18,8 @@ import (
 	"github.com/iotaledger/wasp/packages/util"
 )
 
+type blockChangeCallbackFun func(*rapid.T, state.BlockHash)
+
 type blockCacheNoWALTestSM struct { // State machine for block cache no WAL property based Rapid tests
 	bc            BlockCache
 	chainID       *isc.ChainID
@@ -28,10 +30,13 @@ type blockCacheNoWALTestSM struct { // State machine for block cache no WAL prop
 	blockTimes    []*blockTime
 	blocksInCache []state.BlockHash
 	blocksInDB    []state.BlockHash
+	onAddBlockFun blockChangeCallbackFun
 	log           *logger.Logger
 }
 
-func (bcnwtsmT *blockCacheNoWALTestSM) initWAL(t *rapid.T, wal BlockWAL) {
+var emptyBlockChangeCallbackFun blockChangeCallbackFun = func(*rapid.T, state.BlockHash) {}
+
+func (bcnwtsmT *blockCacheNoWALTestSM) initWAL(t *rapid.T, wal BlockWAL, onAddBlockFun blockChangeCallbackFun) {
 	var err error
 	bcnwtsmT.store = mapdb.NewMapDB()
 	bcnwtsmT.log = testlogger.NewLogger(t)
@@ -42,10 +47,11 @@ func (bcnwtsmT *blockCacheNoWALTestSM) initWAL(t *rapid.T, wal BlockWAL) {
 	bcnwtsmT.blocks = make(map[state.BlockHash]state.Block)
 	bcnwtsmT.blocksInCache = make([]state.BlockHash, 0)
 	bcnwtsmT.blocksInDB = make([]state.BlockHash, 0)
+	bcnwtsmT.onAddBlockFun = onAddBlockFun
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) Init(t *rapid.T) {
-	bcnwtsmT.initWAL(t, NewEmptyBlockWAL())
+	bcnwtsmT.initWAL(t, NewEmptyBlockWAL(), emptyBlockChangeCallbackFun)
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) Cleanup() {
@@ -108,7 +114,9 @@ func (bcnwtsmT *blockCacheNoWALTestSM) CleanCache(t *rapid.T) {
 	time := bcnwtsmT.blockTimes[index].time
 	bcnwtsmT.bc.CleanOlderThan(time)
 	for i := uint32(0); i <= index; i++ {
-		bcnwtsmT.blocksInCache = DeleteBlockHash(bcnwtsmT.blockTimes[i].blockHash, bcnwtsmT.blocksInCache)
+		blockHash := bcnwtsmT.blockTimes[i].blockHash
+		bcnwtsmT.blocksInCache = DeleteBlockHash(blockHash, bcnwtsmT.blocksInCache)
+		t.Logf("Block %s deleted from cache", blockHash)
 	}
 	bcnwtsmT.blockTimes = bcnwtsmT.blockTimes[index+1:]
 	t.Logf("Cache cleaned until %v", time)
@@ -122,6 +130,10 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromCache(t *rapid.T) {
 	if ContainsBlock(blockHash, bcnwtsmT.blocksInDB) {
 		t.Skip()
 	}
+	bcnwtsmT.tstGetBlockFromCache(t, blockHash)
+}
+
+func (bcnwtsmT *blockCacheNoWALTestSM) tstGetBlockFromCache(t *rapid.T, blockHash state.BlockHash) {
 	bcnwtsmT.getAndCheckBlock(t, blockHash)
 	t.Logf("Block from cache %s obtained", blockHash)
 }
@@ -134,11 +146,19 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromDB(t *rapid.T) {
 	if ContainsBlock(blockHash, bcnwtsmT.blocksInCache) {
 		t.Skip()
 	}
+	bcnwtsmT.tstGetBlockFromDB(t, blockHash)
+}
+
+func (bcnwtsmT *blockCacheNoWALTestSM) tstGetBlockFromDB(t *rapid.T, blockHash state.BlockHash) {
+	bcnwtsmT.tstGetBlockNoCache(t, blockHash)
+	t.Logf("Block from DB %s obtained", blockHash)
+}
+
+func (bcnwtsmT *blockCacheNoWALTestSM) tstGetBlockNoCache(t *rapid.T, blockHash state.BlockHash) {
 	bcnwtsmT.getAndCheckBlock(t, blockHash)
 	block, ok := bcnwtsmT.blocks[blockHash]
 	require.True(t, ok)
 	bcnwtsmT.addBlock(t, block)
-	t.Logf("Block from DB %s obtained", blockHash)
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromCacheAndDB(t *rapid.T) {
@@ -149,6 +169,10 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromCacheAndDB(t *rapid.T) {
 	if !ContainsBlock(blockHash, bcnwtsmT.blocksInCache) {
 		t.Skip()
 	}
+	bcnwtsmT.tstGetBlockFromCacheAndDB(t, blockHash)
+}
+
+func (bcnwtsmT *blockCacheNoWALTestSM) tstGetBlockFromCacheAndDB(t *rapid.T, blockHash state.BlockHash) {
 	bcnwtsmT.getAndCheckBlock(t, blockHash)
 	t.Logf("Block from cache and DB %s obtained", blockHash)
 }
@@ -161,6 +185,10 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetLostBlock(t *rapid.T) {
 	if ContainsBlock(blockHash, bcnwtsmT.blocksInDB) {
 		t.Skip()
 	}
+	bcnwtsmT.tstGetLostBlock(t, blockHash)
+}
+
+func (bcnwtsmT *blockCacheNoWALTestSM) tstGetLostBlock(t *rapid.T, blockHash state.BlockHash) {
 	blockExpected, ok := bcnwtsmT.blocks[blockHash]
 	require.True(t, ok)
 	block := bcnwtsmT.bc.GetBlock(blockExpected.BlockIndex(), blockHash)
@@ -207,6 +235,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) addBlock(t *rapid.T, block state.Block) {
 		time:      time.Now(),
 		blockHash: blockHash,
 	})
+	bcnwtsmT.onAddBlockFun(t, blockHash)
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) blocksNotInCache(t *rapid.T) []state.BlockHash {
