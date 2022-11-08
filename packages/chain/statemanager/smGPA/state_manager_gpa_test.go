@@ -12,7 +12,8 @@ import (
 	"github.com/iotaledger/hive.go/core/logger"
 	"github.com/iotaledger/trie.go/trie"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/gr"
-	"github.com/iotaledger/wasp/packages/chain/statemanager/smInputs"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smGPAUtils"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smInputs"
 	"github.com/iotaledger/wasp/packages/chain/statemanager/smUtils"
 	"github.com/iotaledger/wasp/packages/gpa"
 	"github.com/iotaledger/wasp/packages/isc"
@@ -26,7 +27,7 @@ func TestBasic(t *testing.T) {
 	log := testlogger.NewLogger(t)
 	defer log.Sync()
 
-	chainID, blocks, stateOutputs := smUtils.GetBlocks(t, 8, 1)
+	chainID, blocks, stateOutputs := smGPAUtils.GetBlocks(t, 8, 1)
 	nodeID := smUtils.MakeNodeID(0)
 	_, sm := createStateManagerGpa(t, chainID, nodeID, []gpa.NodeID{nodeID}, log)
 	tc := gpa.NewTestContext(map[gpa.NodeID]gpa.GPA{nodeID: sm})
@@ -53,7 +54,7 @@ func TestManyNodes(t *testing.T) {
 	smTimers := NewStateManagerTimers()
 	smTimers.StateManagerGetBlockRetry = 100 * time.Millisecond
 
-	chainID, blocks, stateOutputs := smUtils.GetBlocks(t, 16, 1)
+	chainID, blocks, stateOutputs := smGPAUtils.GetBlocks(t, 16, 1)
 	nodeIDs := smUtils.MakeNodeIDs([]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9})
 	sms := make(map[gpa.NodeID]gpa.GPA)
 	for _, nodeID := range nodeIDs {
@@ -112,18 +113,18 @@ func TestBlockCacheCleaningAuto(t *testing.T) {
 	log := testlogger.NewLogger(t)
 	defer log.Sync()
 
-	tp := smUtils.NewArtifficialTimeProvider()
+	tp := smGPAUtils.NewArtifficialTimeProvider()
 	smTimers := NewStateManagerTimers(tp)
 	smTimers.BlockCacheBlocksInCacheDuration = 300 * time.Millisecond
 	smTimers.BlockCacheBlockCleaningPeriod = 70 * time.Millisecond
 
-	chainID, blocks, _ := smUtils.GetBlocks(t, 6, 2)
+	chainID, blocks, _ := smGPAUtils.GetBlocks(t, 6, 2)
 	nodeID := smUtils.MakeNodeID(0)
 	_, sm := createStateManagerGpa(t, chainID, nodeID, []gpa.NodeID{nodeID}, log, smTimers)
 	var err error
 	smImpl := sm.(*stateManagerGPA)
 	// WAL should not be used for this test
-	smImpl.blockCache, err = smUtils.NewBlockCache(smImpl.store, smTimers.TimeProvider, smUtils.NewEmptyBlockWAL(), smImpl.log)
+	smImpl.blockCache, err = smGPAUtils.NewBlockCache(smImpl.store, smTimers.TimeProvider, smGPAUtils.NewEmptyBlockWAL(), smImpl.log)
 	require.NoError(t, err)
 	tc := gpa.NewTestContext(map[gpa.NodeID]gpa.GPA{nodeID: sm})
 

@@ -5,11 +5,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/iotaledger/wasp/packages/chain/statemanager/smUtils"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smGPAUtils"
 )
 
 func TestMarchalUnmarshalBlockMessage(t *testing.T) {
-	_, blocks, _ := smUtils.GetBlocks(t, 4, 1)
+	_, blocks, _ := smGPAUtils.GetBlocks(t, 4, 1)
 	for i := range blocks {
 		t.Logf("Checking block %v: %v", i, blocks[i].GetHash())
 		marshaled, err := NewBlockMessage(blocks[i], "SOMETHING").MarshalBinary()

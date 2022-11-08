@@ -13,8 +13,9 @@ import (
 
 	"github.com/iotaledger/hive.go/core/kvstore"
 	"github.com/iotaledger/hive.go/core/logger"
-	"github.com/iotaledger/wasp/packages/chain/statemanager/smInputs"
-	"github.com/iotaledger/wasp/packages/chain/statemanager/smMessages"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smGPAUtils"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smInputs"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smMessages"
 	"github.com/iotaledger/wasp/packages/chain/statemanager/smUtils"
 	"github.com/iotaledger/wasp/packages/gpa"
 	"github.com/iotaledger/wasp/packages/isc"
@@ -25,7 +26,7 @@ type stateManagerGPA struct {
 	log                     *logger.Logger
 	chainID                 *isc.ChainID
 	store                   kvstore.KVStore
-	blockCache              smUtils.BlockCache
+	blockCache              smGPAUtils.BlockCache
 	blockRequests           map[state.BlockHash]([]blockRequest) //nolint:gocritic // removing brackets doesn't make code simpler or clearer
 	blockIndexes            map[state.BlockHash]uint32           // TODO: temporar field. Remove it after DB refactoring.
 	nodeRandomiser          smUtils.NodeRandomiser
@@ -54,17 +55,17 @@ func New(chainID *isc.ChainID, nr smUtils.NodeRandomiser, walFolder string, stor
 	} else {
 		timers = NewStateManagerTimers()
 	}
-	var wal smUtils.BlockWAL
+	var wal smGPAUtils.BlockWAL
 	if walFolder == "" {
-		wal = smUtils.NewMockedBlockWAL()
+		wal = smGPAUtils.NewMockedBlockWAL()
 	} else {
-		wal, err = smUtils.NewBlockWAL(walFolder, chainID, log)
+		wal, err = smGPAUtils.NewBlockWAL(walFolder, chainID, log)
 		if err != nil {
 			smLog.Debugf("Error creating block WAL: %v", err)
 			return nil, err
 		}
 	}
-	blockCache, err := smUtils.NewBlockCache(store, timers.TimeProvider, wal, smLog)
+	blockCache, err := smGPAUtils.NewBlockCache(store, timers.TimeProvider, wal, smLog)
 	if err != nil {
 		smLog.Debugf("Error creating block cache: %v", err)
 		return nil, err

@@ -1,7 +1,7 @@
 package smGPA
 
 import (
-	"github.com/iotaledger/wasp/packages/chain/statemanager/smInputs"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smInputs"
 	"github.com/iotaledger/wasp/packages/state"
 )
 

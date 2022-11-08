@@ -1,4 +1,4 @@
-package smUtils
+package smGPAUtils
 
 import (
 	"math/rand"
@@ -173,7 +173,7 @@ func (bwtsmT *blockWALTestSM) Restart(t *rapid.T) {
 func (bwtsmT *blockWALTestSM) getGoodBlockHashes() []state.BlockHash {
 	result := make([]state.BlockHash, 0)
 	for blockHash, _ := range bwtsmT.blocks { //nolint:gofmt,gofumpt,revive,gosimple
-		if !ContainsBlock(blockHash, bwtsmT.blocksMoved) && !ContainsBlock(blockHash, bwtsmT.blocksDamaged) {
+		if !ContainsBlockHash(blockHash, bwtsmT.blocksMoved) && !ContainsBlockHash(blockHash, bwtsmT.blocksDamaged) {
 			result = append(result, blockHash)
 		}
 	}

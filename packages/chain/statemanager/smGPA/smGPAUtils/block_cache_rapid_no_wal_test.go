@@ -1,4 +1,4 @@
-package smUtils
+package smGPAUtils
 
 import (
 	"testing"
@@ -88,7 +88,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) WriteBlockToDb(t *rapid.T) {
 		t.Skip()
 	}
 	blockHash := rapid.SampledFrom(maps.Keys(bcnwtsmT.blocks)).Example()
-	if ContainsBlock(blockHash, bcnwtsmT.blocksInDB) {
+	if ContainsBlockHash(blockHash, bcnwtsmT.blocksInDB) {
 		t.Skip()
 	}
 	block, ok := bcnwtsmT.blocks[blockHash]
@@ -127,7 +127,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromCache(t *rapid.T) {
 		t.Skip()
 	}
 	blockHash := rapid.SampledFrom(bcnwtsmT.blocksInCache).Example()
-	if ContainsBlock(blockHash, bcnwtsmT.blocksInDB) {
+	if ContainsBlockHash(blockHash, bcnwtsmT.blocksInDB) {
 		t.Skip()
 	}
 	bcnwtsmT.tstGetBlockFromCache(t, blockHash)
@@ -143,7 +143,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromDB(t *rapid.T) {
 		t.Skip()
 	}
 	blockHash := rapid.SampledFrom(bcnwtsmT.blocksInDB).Example()
-	if ContainsBlock(blockHash, bcnwtsmT.blocksInCache) {
+	if ContainsBlockHash(blockHash, bcnwtsmT.blocksInCache) {
 		t.Skip()
 	}
 	bcnwtsmT.tstGetBlockFromDB(t, blockHash)
@@ -166,7 +166,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromCacheAndDB(t *rapid.T) {
 		t.Skip()
 	}
 	blockHash := rapid.SampledFrom(bcnwtsmT.blocksInDB).Example()
-	if !ContainsBlock(blockHash, bcnwtsmT.blocksInCache) {
+	if !ContainsBlockHash(blockHash, bcnwtsmT.blocksInCache) {
 		t.Skip()
 	}
 	bcnwtsmT.tstGetBlockFromCacheAndDB(t, blockHash)
@@ -182,7 +182,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetLostBlock(t *rapid.T) {
 		t.Skip()
 	}
 	blockHash := rapid.SampledFrom(bcnwtsmT.blocksNotInCache(t)).Example()
-	if ContainsBlock(blockHash, bcnwtsmT.blocksInDB) {
+	if ContainsBlockHash(blockHash, bcnwtsmT.blocksInDB) {
 		t.Skip()
 	}
 	bcnwtsmT.tstGetLostBlock(t, blockHash)
@@ -206,11 +206,11 @@ func (bcnwtsmT *blockCacheNoWALTestSM) Restart(t *rapid.T) {
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) invariantAllBlocksInCacheDifferent(t *rapid.T) {
-	require.True(t, AllDifferent(bcnwtsmT.blocksInCache))
+	require.True(t, AllDifferentBlockHashes(bcnwtsmT.blocksInCache))
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) invariantAllBlocksInDBDifferent(t *rapid.T) {
-	require.True(t, AllDifferent(bcnwtsmT.blocksInDB))
+	require.True(t, AllDifferentBlockHashes(bcnwtsmT.blocksInDB))
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) invariantBlocksInCacheBijectionToBlockTimes(t *rapid.T) {
@@ -220,7 +220,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) invariantBlocksInCacheBijectionToBlockTim
 	}
 	require.Equal(t, len(bcnwtsmT.blocksInCache), len(blockTimeHashes))
 	for i := range bcnwtsmT.blocksInCache {
-		require.True(t, ContainsBlock(bcnwtsmT.blocksInCache[i], blockTimeHashes))
+		require.True(t, ContainsBlockHash(bcnwtsmT.blocksInCache[i], blockTimeHashes))
 	}
 }
 
@@ -229,7 +229,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) addBlock(t *rapid.T, block state.Block) {
 	bcnwtsmT.blocks[blockHash] = block
 	err := bcnwtsmT.bc.AddBlock(block)
 	require.NoError(t, err)
-	require.False(t, ContainsBlock(blockHash, bcnwtsmT.blocksInCache))
+	require.False(t, ContainsBlockHash(blockHash, bcnwtsmT.blocksInCache))
 	bcnwtsmT.blocksInCache = append(bcnwtsmT.blocksInCache, blockHash)
 	bcnwtsmT.blockTimes = append(bcnwtsmT.blockTimes, &blockTime{
 		time:      time.Now(),
@@ -239,7 +239,7 @@ func (bcnwtsmT *blockCacheNoWALTestSM) addBlock(t *rapid.T, block state.Block) {
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) blocksNotInCache(t *rapid.T) []state.BlockHash {
-	return RemoveAll(bcnwtsmT.blocksInCache, maps.Keys(bcnwtsmT.blocks))
+	return RemoveAllBlockHashes(bcnwtsmT.blocksInCache, maps.Keys(bcnwtsmT.blocks))
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) getAndCheckBlock(t *rapid.T, blockHash state.BlockHash) {

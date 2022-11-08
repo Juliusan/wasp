@@ -6,7 +6,7 @@ package smGPA
 import (
 	"time"
 
-	"github.com/iotaledger/wasp/packages/chain/statemanager/smUtils"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smGPAUtils"
 )
 
 type StateManagerTimers struct {
@@ -19,15 +19,15 @@ type StateManagerTimers struct {
 	// How often requests waiting for response should be checked for expired context
 	StateManagerRequestCleaningPeriod time.Duration
 
-	TimeProvider smUtils.TimeProvider
+	TimeProvider smGPAUtils.TimeProvider
 }
 
-func NewStateManagerTimers(tpOpt ...smUtils.TimeProvider) StateManagerTimers {
-	var tp smUtils.TimeProvider
+func NewStateManagerTimers(tpOpt ...smGPAUtils.TimeProvider) StateManagerTimers {
+	var tp smGPAUtils.TimeProvider
 	if len(tpOpt) > 0 {
 		tp = tpOpt[0]
 	} else {
-		tp = smUtils.NewDefaultTimeProvider()
+		tp = smGPAUtils.NewDefaultTimeProvider()
 	}
 	return StateManagerTimers{
 		BlockCacheBlocksInCacheDuration:   1 * time.Hour,

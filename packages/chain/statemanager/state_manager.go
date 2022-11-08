@@ -9,7 +9,7 @@ import (
 	"github.com/iotaledger/wasp/packages/chain/aaa2/cons/gr"
 	"github.com/iotaledger/wasp/packages/chain/aaa2/node"
 	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA"
-	"github.com/iotaledger/wasp/packages/chain/statemanager/smInputs"
+	"github.com/iotaledger/wasp/packages/chain/statemanager/smGPA/smInputs"
 	"github.com/iotaledger/wasp/packages/chain/statemanager/smUtils"
 	"github.com/iotaledger/wasp/packages/cryptolib"
 	"github.com/iotaledger/wasp/packages/gpa"

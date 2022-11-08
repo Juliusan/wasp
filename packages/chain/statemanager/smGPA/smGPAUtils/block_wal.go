@@ -1,4 +1,4 @@
-package smUtils
+package smGPAUtils
 
 import (
 	"bufio"

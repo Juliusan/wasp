@@ -5,16 +5,11 @@
 //
 //
 
-package smUtils
+package smGPAUtils
 
 import (
 	"time"
 )
-
-type TimeProvider interface {
-	SetNow(time.Time)
-	GetNow() time.Time
-}
 
 type defaultTimeProvider struct{}
 
