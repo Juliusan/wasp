@@ -2,21 +2,12 @@ package smUtils
 
 import (
 	"testing"
-	//	"time"
 
 	"github.com/stretchr/testify/require"
-	//		"golang.org/x/exp/maps"
 	"pgregory.net/rapid"
-	/*	"github.com/iotaledger/hive.go/core/kvstore"
-		"github.com/iotaledger/hive.go/core/kvstore/mapdb"
-		"github.com/iotaledger/hive.go/core/logger"
-		"github.com/iotaledger/wasp/packages/database/dbkeys"
-		"github.com/iotaledger/wasp/packages/isc"*/
-	"github.com/iotaledger/wasp/packages/state"
-	/*"github.com/iotaledger/wasp/packages/testutil/testlogger"
-	"github.com/iotaledger/wasp/packages/util"*/)
 
-//const constTestFolder = "basicWALTest"
+	"github.com/iotaledger/wasp/packages/state"
+)
 
 type blockCacheTestSM struct { // State machine for block cache property based Rapid tests
 	*blockCacheNoWALTestSM
