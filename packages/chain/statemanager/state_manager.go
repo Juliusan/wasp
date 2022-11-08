@@ -104,8 +104,6 @@ func (smT *stateManager) ReceiveConfirmedAliasOutput(aliasOutput *isc.AliasOutpu
 
 func (smT *stateManager) AccessNodesUpdated(accessNodePubKeys []*cryptolib.PublicKey) {
 	smT.nodePubKeysPipe.In() <- accessNodePubKeys
-
-	//	smT.updatePublicKeys(accessNodePubKeys)
 }
 
 // -------------------------------------
