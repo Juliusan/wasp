@@ -127,6 +127,25 @@ func GetNextState(
 	return block, aliasOutputWithID, nextVS
 }
 
+func ContainsBlock(blockHash state.BlockHash, blockHashes []state.BlockHash) bool {
+	for _, bh := range blockHashes {
+		if bh.Equals(blockHash) {
+			return true
+		}
+	}
+	return false
+}
+
+func DeleteBlockHash(blockHash state.BlockHash, blockHashes []state.BlockHash) []state.BlockHash {
+	for i := range blockHashes {
+		if blockHashes[i].Equals(blockHash) {
+			blockHashes[i] = blockHashes[len(blockHashes)-1]
+			return blockHashes[:len(blockHashes)-1]
+		}
+	}
+	return blockHashes
+}
+
 func getRandomTxID() iotago.TransactionID {
 	var result iotago.TransactionID
 	rand.Read(result[:])

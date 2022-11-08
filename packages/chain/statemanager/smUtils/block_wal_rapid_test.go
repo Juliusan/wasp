@@ -83,19 +83,10 @@ func (bwtsmT *blockWALTestSM) ReWriteBlock(t *rapid.T) {
 	require.True(t, ok)
 	err := bwtsmT.bw.Write(block)
 	require.NoError(t, err)
-	deleteBlockHashFun := func(blockHashes []state.BlockHash) []state.BlockHash {
-		for i := range blockHashes {
-			if blockHashes[i].Equals(blockHash) {
-				blockHashes[i] = blockHashes[len(blockHashes)-1]
-				return blockHashes[:len(blockHashes)-1]
-			}
-		}
-		return blockHashes
-	}
 	if takeFrom == 0 {
-		bwtsmT.blocksMoved = deleteBlockHashFun(bwtsmT.blocksMoved)
+		bwtsmT.blocksMoved = DeleteBlockHash(blockHash, bwtsmT.blocksMoved)
 	} else {
-		bwtsmT.blocksDamaged = deleteBlockHashFun(bwtsmT.blocksDamaged)
+		bwtsmT.blocksDamaged = DeleteBlockHash(blockHash, bwtsmT.blocksDamaged)
 	}
 	t.Logf("Block %s rewritten", blockHash)
 }
@@ -182,20 +173,11 @@ func (bwtsmT *blockWALTestSM) Restart(t *rapid.T) {
 func (bwtsmT *blockWALTestSM) getGoodBlockHashes() []state.BlockHash {
 	result := make([]state.BlockHash, 0)
 	for blockHash, _ := range bwtsmT.blocks { //nolint:gofmt,gofumpt,revive,gosimple
-		if !bwtsmT.containsBlock(blockHash, bwtsmT.blocksMoved) && !bwtsmT.containsBlock(blockHash, bwtsmT.blocksDamaged) {
+		if !ContainsBlock(blockHash, bwtsmT.blocksMoved) && !ContainsBlock(blockHash, bwtsmT.blocksDamaged) {
 			result = append(result, blockHash)
 		}
 	}
 	return result
-}
-
-func (bwtsmT *blockWALTestSM) containsBlock(blockHash state.BlockHash, blockHashes []state.BlockHash) bool {
-	for _, bh := range blockHashes {
-		if bh.Equals(blockHash) {
-			return true
-		}
-	}
-	return false
 }
 
 func (bwtsmT *blockWALTestSM) pathFromHash(blockHash state.BlockHash) string {
