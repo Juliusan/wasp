@@ -146,6 +146,25 @@ func DeleteBlockHash(blockHash state.BlockHash, blockHashes []state.BlockHash) [
 	return blockHashes
 }
 
+func RemoveAll(blockHashesToRemove []state.BlockHash, blockHashes []state.BlockHash) []state.BlockHash {
+	result := blockHashes
+	for i := range blockHashesToRemove {
+		result = DeleteBlockHash(blockHashesToRemove[i], result)
+	}
+	return result
+}
+
+func AllDifferent(blockHashes []state.BlockHash) bool {
+	for i := range blockHashes {
+		for j := 0; j < i; j++ {
+			if blockHashes[i].Equals(blockHashes[j]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func getRandomTxID() iotago.TransactionID {
 	var result iotago.TransactionID
 	rand.Read(result[:])

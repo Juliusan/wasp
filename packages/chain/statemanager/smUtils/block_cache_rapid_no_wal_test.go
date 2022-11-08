@@ -18,20 +18,17 @@ import (
 	"github.com/iotaledger/wasp/packages/util"
 )
 
-//const constTestFolder = "basicWALTest"
-
 type blockCacheNoWALTestSM struct { // State machine for block cache no WAL property based Rapid tests
-	bc                 BlockCache
-	chainID            *isc.ChainID
-	ao                 *isc.AliasOutputWithID
-	vs                 state.VirtualStateAccess
-	store              kvstore.KVStore
-	blocks             map[state.BlockHash]state.Block
-	blockTimes         []*blockTime
-	blocksInCache      []state.BlockHash
-	blocksDelFromCache []state.BlockHash
-	blocksInDB         []state.BlockHash
-	log                *logger.Logger
+	bc            BlockCache
+	chainID       *isc.ChainID
+	ao            *isc.AliasOutputWithID
+	vs            state.VirtualStateAccess
+	store         kvstore.KVStore
+	blocks        map[state.BlockHash]state.Block
+	blockTimes    []*blockTime
+	blocksInCache []state.BlockHash
+	blocksInDB    []state.BlockHash
+	log           *logger.Logger
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) initWAL(t *rapid.T, wal BlockWAL) {
@@ -44,7 +41,6 @@ func (bcnwtsmT *blockCacheNoWALTestSM) initWAL(t *rapid.T, wal BlockWAL) {
 	bcnwtsmT.blockTimes = make([]*blockTime, 0)
 	bcnwtsmT.blocks = make(map[state.BlockHash]state.Block)
 	bcnwtsmT.blocksInCache = make([]state.BlockHash, 0)
-	bcnwtsmT.blocksDelFromCache = make([]state.BlockHash, 0)
 	bcnwtsmT.blocksInDB = make([]state.BlockHash, 0)
 }
 
@@ -57,7 +53,8 @@ func (bcnwtsmT *blockCacheNoWALTestSM) Cleanup() {
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) Check(t *rapid.T) {
-	bcnwtsmT.invariantAllBlocksInCacheXorDeleted(t)
+	bcnwtsmT.invariantAllBlocksInCacheDifferent(t)
+	bcnwtsmT.invariantAllBlocksInDBDifferent(t)
 	bcnwtsmT.invariantBlocksInCacheBijectionToBlockTimes(t)
 }
 
@@ -70,14 +67,13 @@ func (bcnwtsmT *blockCacheNoWALTestSM) AddNewBlock(t *rapid.T) {
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) AddExistingBlock(t *rapid.T) {
-	if len(bcnwtsmT.blocksDelFromCache) == 0 {
+	if len(bcnwtsmT.blocksInCache) == len(bcnwtsmT.blocks) {
 		t.Skip()
 	}
-	blockHash := rapid.SampledFrom(bcnwtsmT.blocksDelFromCache).Example()
+	blockHash := rapid.SampledFrom(bcnwtsmT.blocksNotInCache(t)).Example()
 	block, ok := bcnwtsmT.blocks[blockHash]
 	require.True(t, ok)
 	bcnwtsmT.addBlock(t, block)
-	bcnwtsmT.blocksDelFromCache = DeleteBlockHash(blockHash, bcnwtsmT.blocksDelFromCache)
 	t.Logf("Block %s added to cache again", block.GetHash())
 }
 
@@ -86,6 +82,9 @@ func (bcnwtsmT *blockCacheNoWALTestSM) WriteBlockToDb(t *rapid.T) {
 		t.Skip()
 	}
 	blockHash := rapid.SampledFrom(maps.Keys(bcnwtsmT.blocks)).Example()
+	if ContainsBlock(blockHash, bcnwtsmT.blocksInDB) {
+		t.Skip()
+	}
 	block, ok := bcnwtsmT.blocks[blockHash]
 	require.True(t, ok)
 	batch, err := bcnwtsmT.store.Batched()
@@ -110,7 +109,6 @@ func (bcnwtsmT *blockCacheNoWALTestSM) CleanCache(t *rapid.T) {
 	bcnwtsmT.bc.CleanOlderThan(time)
 	for i := uint32(0); i <= index; i++ {
 		bcnwtsmT.blocksInCache = DeleteBlockHash(bcnwtsmT.blockTimes[i].blockHash, bcnwtsmT.blocksInCache)
-		bcnwtsmT.blocksDelFromCache = append(bcnwtsmT.blocksDelFromCache, bcnwtsmT.blockTimes[i].blockHash)
 	}
 	bcnwtsmT.blockTimes = bcnwtsmT.blockTimes[index+1:]
 	t.Logf("Cache cleaned until %v", time)
@@ -140,7 +138,6 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromDB(t *rapid.T) {
 	block, ok := bcnwtsmT.blocks[blockHash]
 	require.True(t, ok)
 	bcnwtsmT.addBlock(t, block)
-	bcnwtsmT.blocksDelFromCache = DeleteBlockHash(blockHash, bcnwtsmT.blocksDelFromCache)
 	t.Logf("Block from DB %s obtained", blockHash)
 }
 
@@ -157,10 +154,10 @@ func (bcnwtsmT *blockCacheNoWALTestSM) GetBlockFromCacheAndDB(t *rapid.T) {
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) GetLostBlock(t *rapid.T) {
-	if len(bcnwtsmT.blocksDelFromCache) == 0 {
+	if len(bcnwtsmT.blocksInCache) == len(bcnwtsmT.blocks) {
 		t.Skip()
 	}
-	blockHash := rapid.SampledFrom(bcnwtsmT.blocksDelFromCache).Example()
+	blockHash := rapid.SampledFrom(bcnwtsmT.blocksNotInCache(t)).Example()
 	if ContainsBlock(blockHash, bcnwtsmT.blocksInDB) {
 		t.Skip()
 	}
@@ -175,20 +172,17 @@ func (bcnwtsmT *blockCacheNoWALTestSM) Restart(t *rapid.T) {
 	var err error
 	bcnwtsmT.bc, err = NewBlockCache(bcnwtsmT.store, NewDefaultTimeProvider(), bcnwtsmT.bc.(*blockCache).wal, bcnwtsmT.log)
 	require.NoError(t, err)
-	bcnwtsmT.blocksDelFromCache = append(bcnwtsmT.blocksDelFromCache, bcnwtsmT.blocksInCache...)
 	bcnwtsmT.blocksInCache = make([]state.BlockHash, 0)
 	bcnwtsmT.blockTimes = make([]*blockTime, 0)
 	t.Logf("Block cache was restarted")
 }
 
-func (bcnwtsmT *blockCacheNoWALTestSM) invariantAllBlocksInCacheXorDeleted(t *rapid.T) {
-	for blockHash, _ := range bcnwtsmT.blocks { //nolint:gofmt,gofumpt,revive,gosimple
-		if ContainsBlock(blockHash, bcnwtsmT.blocksInCache) {
-			require.False(t, ContainsBlock(blockHash, bcnwtsmT.blocksDelFromCache))
-		} else {
-			require.True(t, ContainsBlock(blockHash, bcnwtsmT.blocksDelFromCache))
-		}
-	}
+func (bcnwtsmT *blockCacheNoWALTestSM) invariantAllBlocksInCacheDifferent(t *rapid.T) {
+	require.True(t, AllDifferent(bcnwtsmT.blocksInCache))
+}
+
+func (bcnwtsmT *blockCacheNoWALTestSM) invariantAllBlocksInDBDifferent(t *rapid.T) {
+	require.True(t, AllDifferent(bcnwtsmT.blocksInDB))
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) invariantBlocksInCacheBijectionToBlockTimes(t *rapid.T) {
@@ -213,6 +207,10 @@ func (bcnwtsmT *blockCacheNoWALTestSM) addBlock(t *rapid.T, block state.Block) {
 		time:      time.Now(),
 		blockHash: blockHash,
 	})
+}
+
+func (bcnwtsmT *blockCacheNoWALTestSM) blocksNotInCache(t *rapid.T) []state.BlockHash {
+	return RemoveAll(bcnwtsmT.blocksInCache, maps.Keys(bcnwtsmT.blocks))
 }
 
 func (bcnwtsmT *blockCacheNoWALTestSM) getAndCheckBlock(t *rapid.T, blockHash state.BlockHash) {
