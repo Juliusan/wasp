@@ -120,7 +120,8 @@ func (c *Chains) activateAllFromRegistry() error {
 
 	astr := make([]string, len(chainRecords))
 	for i := range astr {
-		astr[i] = chainRecords[i].ChainID().String()[:10] + ".."
+		chainID := chainRecords[i].ChainID()
+		astr[i] = chainID.String()[:10] + ".."
 	}
 	c.log.Debugf("loaded %d chain record(s) from registry: %+v", len(chainRecords), astr)
 
