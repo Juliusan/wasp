@@ -13,7 +13,7 @@ import (
 
 	"github.com/iotaledger/hive.go/core/logger"
 	"github.com/iotaledger/wasp/packages/chain"
-	"github.com/iotaledger/wasp/packages/chain/consensus/journal"
+	"github.com/iotaledger/wasp/packages/chain/cmtLog"
 	"github.com/iotaledger/wasp/packages/database"
 	"github.com/iotaledger/wasp/packages/isc"
 	"github.com/iotaledger/wasp/packages/metrics"
@@ -47,10 +47,10 @@ type Chains struct {
 	rawBlocksEnabled                 bool
 	rawBlocksDir                     string
 
-	chainRecordRegistryProvider      registry.ChainRecordRegistryProvider
-	dkShareRegistryProvider          registry.DKShareRegistryProvider
-	nodeIdentityProvider             registry.NodeIdentityProvider
-	consensusJournalRegistryProvider journal.Provider
+	chainRecordRegistryProvider registry.ChainRecordRegistryProvider
+	dkShareRegistryProvider     registry.DKShareRegistryProvider
+	nodeIdentityProvider        registry.NodeIdentityProvider
+	consensusStateCmtLog        cmtLog.Store
 
 	metrics *metrics.Metrics
 
@@ -77,6 +77,7 @@ func New(
 	chainRecordRegistryProvider registry.ChainRecordRegistryProvider,
 	dkShareRegistryProvider registry.DKShareRegistryProvider,
 	nodeIdentityProvider registry.NodeIdentityProvider,
+	consensusStateCmtLog cmtLog.Store,
 	allMetrics *metrics.Metrics,
 ) *Chains {
 	ret := &Chains{
@@ -94,6 +95,7 @@ func New(
 		chainRecordRegistryProvider:      chainRecordRegistryProvider,
 		dkShareRegistryProvider:          dkShareRegistryProvider,
 		nodeIdentityProvider:             nodeIdentityProvider,
+		consensusStateCmtLog:             consensusStateCmtLog,
 		metrics:                          allMetrics,
 	}
 	return ret
@@ -181,7 +183,7 @@ func (c *Chains) Activate(chainID isc.ChainID) error {
 		c.nodeIdentityProvider.NodeIdentity(),
 		c.processorConfig,
 		nil, // TODO: dkRegistry tcrypto.DKShareRegistryProvider,
-		nil, // TODO: cmtLogStore cmtLog.Store,
+		c.consensusStateCmtLog,
 		nil, // TODO: blockWAL smGPAUtils.BlockWAL
 		c.networkProvider,
 		c.log,

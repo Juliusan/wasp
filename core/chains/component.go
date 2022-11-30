@@ -8,7 +8,7 @@ import (
 
 	"github.com/iotaledger/hive.go/core/app"
 	"github.com/iotaledger/wasp/packages/chain"
-	"github.com/iotaledger/wasp/packages/chain/consensus/journal"
+	"github.com/iotaledger/wasp/packages/chain/cmtLog"
 	"github.com/iotaledger/wasp/packages/chains"
 	"github.com/iotaledger/wasp/packages/daemon"
 	"github.com/iotaledger/wasp/packages/database"
@@ -38,12 +38,12 @@ var (
 
 type dependencies struct {
 	dig.In
-	Chains                           *chains.Chains
-	Metrics                          *metrics.Metrics `optional:"true"`
-	ChainRecordRegistryProvider      registry.ChainRecordRegistryProvider
-	DKShareRegistryProvider          registry.DKShareRegistryProvider
-	NodeIdentityProvider             registry.NodeIdentityProvider
-	ConsensusJournalRegistryProvider journal.Provider
+	Chains                      *chains.Chains
+	Metrics                     *metrics.Metrics `optional:"true"`
+	ChainRecordRegistryProvider registry.ChainRecordRegistryProvider
+	DKShareRegistryProvider     registry.DKShareRegistryProvider
+	NodeIdentityProvider        registry.NodeIdentityProvider
+	ConsensusStateCmtLog        cmtLog.Store
 }
 
 func initConfigPars(c *dig.Container) error {
@@ -95,6 +95,7 @@ func provide(c *dig.Container) error {
 				deps.ChainRecordRegistryProvider,
 				deps.DKShareRegistryProvider,
 				deps.NodeIdentityProvider,
+				deps.ConsensusStateCmtLog,
 				deps.Metrics,
 			),
 		}
@@ -107,7 +108,9 @@ func provide(c *dig.Container) error {
 
 func run() error {
 	err := CoreComponent.Daemon().BackgroundWorker(CoreComponent.Name, func(ctx context.Context) {
-		deps.Chains.Run(ctx)
+		if err := deps.Chains.Run(ctx); err != nil {
+			panic(err)
+		}
 		<-ctx.Done()
 		CoreComponent.LogInfo("closing chains plugin...")
 	}, daemon.PriorityChains)
