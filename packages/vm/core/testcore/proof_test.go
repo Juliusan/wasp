@@ -1,6 +1,7 @@
 package testcore
 
 import (
+	"encoding/hex"
 	"os"
 	"testing"
 
@@ -89,7 +90,7 @@ func TestProofs(t *testing.T) {
 
 		require.NoError(t, err)
 
-		require.True(t, pastL1Commitment.GetTrieRoot().Equals(bi.L1Commitment.GetTrieRoot()))
+		require.Equal(t, pastL1Commitment.GetTrieRoot(), bi.L1Commitment.GetTrieRoot())
 	})
 	t.Run("proof past block", func(t *testing.T) {
 		env := solo.New(t)
@@ -111,7 +112,7 @@ func TestProofs(t *testing.T) {
 		pastBlockInfo, poi, err := ch.GetBlockProof(pastBlockIndex)
 		require.NoError(t, err)
 
-		require.True(t, pastL1Commitment.GetTrieRoot().Equals(pastBlockInfo.L1Commitment.GetTrieRoot()))
+		require.Equal(t, pastL1Commitment.GetTrieRoot(), pastBlockInfo.L1Commitment.GetTrieRoot())
 		err = poi.ValidateValue(ch.GetL1Commitment().GetTrieRoot(), pastBlockInfo.Bytes())
 
 		require.NoError(t, err)
@@ -135,7 +136,7 @@ func TestProofStateTerminals(t *testing.T) {
 		}
 		cS, err := ch.GetContractStateCommitment(ci.Hname())
 		require.NoError(t, err)
-		t.Logf("BEFORE: commitment to the state of the contract '%s': %s", ci.Name, cS)
+		t.Logf("BEFORE: commitment to the state of the contract '%s': %s", ci.Name, hex.EncodeToString(cS))
 	}
 
 	_, err = ch.UploadBlobFromFile(nil, randomFile, "file")
@@ -154,6 +155,6 @@ func TestProofStateTerminals(t *testing.T) {
 		}
 		cS, err := ch.GetContractStateCommitment(ci.Hname())
 		require.NoError(t, err)
-		t.Logf("AFTER: commitment to the state of the contract '%s': %s", ci.Name, cS)
+		t.Logf("AFTER: commitment to the state of the contract '%s': %s", ci.Name, hex.EncodeToString(cS))
 	}
 }

@@ -8,10 +8,11 @@ import (
 
 	"github.com/iotaledger/hive.go/core/app"
 	"github.com/iotaledger/wasp/packages/chain"
+	"github.com/iotaledger/wasp/packages/chain/cmtLog"
 	"github.com/iotaledger/wasp/packages/chains"
-	"github.com/iotaledger/wasp/packages/database/dbmanager"
+	"github.com/iotaledger/wasp/packages/daemon"
+	"github.com/iotaledger/wasp/packages/database"
 	"github.com/iotaledger/wasp/packages/metrics"
-	"github.com/iotaledger/wasp/packages/parameters"
 	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/registry"
 	"github.com/iotaledger/wasp/packages/vm/processors"
@@ -37,10 +38,12 @@ var (
 
 type dependencies struct {
 	dig.In
-
-	Chains          *chains.Chains
-	Metrics         *metrics.Metrics `optional:"true"`
-	DefaultRegistry registry.Registry
+	Chains                      *chains.Chains
+	Metrics                     *metrics.Metrics `optional:"true"`
+	ChainRecordRegistryProvider registry.ChainRecordRegistryProvider
+	DKShareRegistryProvider     registry.DKShareRegistryProvider
+	NodeIdentityProvider        registry.NodeIdentityProvider
+	ConsensusStateCmtLog        cmtLog.Store
 }
 
 func initConfigPars(c *dig.Container) error {
@@ -64,10 +67,10 @@ func provide(c *dig.Container) error {
 	type chainsDeps struct {
 		dig.In
 
-		ProcessorsConfig       *processors.Config
-		DatabaseManager        *dbmanager.DBManager
-		DefaultNetworkProvider peering.NetworkProvider `name:"defaultNetworkProvider"`
-		NodeConnection         chain.NodeConnection
+		ProcessorsConfig *processors.Config
+		DatabaseManager  *database.Manager
+		NetworkProvider  peering.NetworkProvider `name:"networkProvider"`
+		NodeConnection   chain.NodeConnection
 	}
 
 	type chainsResult struct {
@@ -85,10 +88,15 @@ func provide(c *dig.Container) error {
 				ParamsChains.BroadcastUpToNPeers,
 				ParamsChains.BroadcastInterval,
 				ParamsChains.PullMissingRequestsFromCommittee,
-				chDeps.DefaultNetworkProvider,
-				chDeps.DatabaseManager.GetOrCreateKVStore,
+				chDeps.NetworkProvider,
+				chDeps.DatabaseManager.GetOrCreateChainStateKVStore,
 				ParamsRawBlocks.Enabled,
 				ParamsRawBlocks.Directory,
+				deps.ChainRecordRegistryProvider,
+				deps.DKShareRegistryProvider,
+				deps.NodeIdentityProvider,
+				deps.ConsensusStateCmtLog,
+				deps.Metrics,
 			),
 		}
 	}); err != nil {
@@ -100,13 +108,12 @@ func provide(c *dig.Container) error {
 
 func run() error {
 	err := CoreComponent.Daemon().BackgroundWorker(CoreComponent.Name, func(ctx context.Context) {
-		if err := deps.Chains.Run(ctx, deps.DefaultRegistry, deps.Metrics); err != nil {
-			CoreComponent.LogErrorf("failed to start chains: %v", err)
-			return
+		if err := deps.Chains.Run(ctx); err != nil {
+			panic(err)
 		}
-
 		<-ctx.Done()
-	}, parameters.PriorityChains)
+		CoreComponent.LogInfo("closing chains plugin...")
+	}, daemon.PriorityChains)
 	if err != nil {
 		CoreComponent.LogError(err)
 		return err

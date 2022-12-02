@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/xerrors"
 
 	"github.com/iotaledger/hive.go/core/logger"
 	iotago "github.com/iotaledger/iota.go/v3"
@@ -35,7 +36,7 @@ import (
 type ViewContext struct {
 	processors     *processors.Cache
 	stateReader    state.State
-	chainID        *isc.ChainID
+	chainID        isc.ChainID
 	log            *logger.Logger
 	chainInfo      *governance.ChainInfo
 	gasBurnLog     *gas.BurnLog
@@ -47,10 +48,15 @@ type ViewContext struct {
 var _ execution.WaspContext = &ViewContext{}
 
 func New(ch chain.ChainCore, blockIndex uint32) *ViewContext {
+	state, err := ch.GetStateReader().StateByIndex(blockIndex)
+	if err != nil {
+		panic(xerrors.Errorf("cannot get a state with Index=%v for ChainID=%v: %w", blockIndex, ch.ID(), err))
+	}
+	chainID := ch.ID()
 	return &ViewContext{
 		processors:     ch.Processors(),
-		stateReader:    ch.GetStateReader(blockIndex),
-		chainID:        ch.ID(),
+		stateReader:    state,
+		chainID:        *chainID,
 		log:            ch.Log().Desugar().WithOptions(zap.AddCallerSkip(1)).Sugar(),
 		gasBurnEnabled: true,
 	}
@@ -86,6 +92,19 @@ func (ctx *ViewContext) AccountID() isc.AgentID {
 		return ctx.ChainID().CommonAccount()
 	}
 	return isc.NewContractAgentID(ctx.ChainID(), hname)
+}
+
+func (ctx *ViewContext) Caller() isc.AgentID {
+	switch len(ctx.callStack) {
+	case 0:
+		panic("getCallContext: stack is empty")
+	case 1:
+		// first call (from webapi)
+		return nil
+	default:
+		callerHname := ctx.callStack[len(ctx.callStack)-1].contract
+		return isc.NewContractAgentID(&ctx.chainID, callerHname)
+	}
 }
 
 func (ctx *ViewContext) Processors() *processors.Cache {
@@ -248,7 +267,7 @@ func (ctx *ViewContext) GetBlockProof(blockIndex uint32) ([]byte, *trie.MerklePr
 
 // GetRootCommitment calculates root commitment from state.
 // A valid state must return root commitment equal to the L1Commitment from the anchor
-func (ctx *ViewContext) GetRootCommitment() trie.VCommitment {
+func (ctx *ViewContext) GetRootCommitment() trie.Hash {
 	return ctx.stateReader.TrieRoot()
 }
 

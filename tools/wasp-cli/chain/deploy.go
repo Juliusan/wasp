@@ -14,7 +14,6 @@ import (
 	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/client"
 	"github.com/iotaledger/wasp/packages/apilib"
-	"github.com/iotaledger/wasp/packages/chain/dss/node"
 	"github.com/iotaledger/wasp/packages/evm/evmtypes"
 	"github.com/iotaledger/wasp/packages/kv/codec"
 	"github.com/iotaledger/wasp/packages/kv/dict"
@@ -44,6 +43,11 @@ func defaultQuorum(n int) int {
 	return quorum
 }
 
+func isEnoughQuorum(n, t int) (bool, int) {
+	maxF := (n - 1) / 3
+	return t >= (n - maxF), maxF
+}
+
 func deployCmd() *cobra.Command {
 	var (
 		committee        []int
@@ -68,7 +72,7 @@ func deployCmd() *cobra.Command {
 				quorum = defaultQuorum(len(committee))
 			}
 
-			if ok, _ := node.IsEnoughQuorum(len(committee), quorum); !ok {
+			if ok, _ := isEnoughQuorum(len(committee), quorum); !ok {
 				log.Fatalf("quorum needs to be bigger than 1/3 of committee size")
 			}
 
@@ -105,7 +109,6 @@ func deployCmd() *cobra.Command {
 					root.ParamEVM(evm.FieldGenesisAlloc):    evmtypes.EncodeGenesisAlloc(evmParams.getGenesis(nil)),
 					root.ParamEVM(evm.FieldBlockGasLimit):   codec.EncodeUint64(evmParams.BlockGasLimit),
 					root.ParamEVM(evm.FieldBlockKeepAmount): codec.EncodeInt32(evmParams.BlockKeepAmount),
-					root.ParamEVM(evm.FieldGasRatio):        codec.EncodeRatio32(evmParams.GasRatio),
 				},
 			})
 			log.Check(err)

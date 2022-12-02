@@ -25,7 +25,9 @@ func AddEndpoints(
 	network peering.NetworkProvider,
 	tnm peering.TrustedNetworkManager,
 	userManager *users.UserManager,
-	registryProvider registry.Provider,
+	chainRecordRegistryProvider registry.ChainRecordRegistryProvider,
+	dkShareRegistryProvider registry.DKShareRegistryProvider,
+	nodeIdentityProvider registry.NodeIdentityProvider,
 	chainsProvider chains.Provider,
 	nodeProvider dkg.NodeProvider,
 	shutdown ShutdownFunc,
@@ -40,17 +42,20 @@ func AddEndpoints(
 		return claims.HasPermission(permissions.API)
 	}
 
-	authentication.AddAuthentication(adm.EchoGroup(), userManager, registryProvider, authConfig, claimValidator)
+	authentication.AddAuthentication(adm.EchoGroup(), userManager, nodeIdentityProvider, authConfig, claimValidator)
 	addShutdownEndpoint(adm, shutdown)
-	addNodeOwnerEndpoints(adm, registryProvider, nodeOwnerAddresses)
-	addChainRecordEndpoints(adm, registryProvider)
+	addNodeOwnerEndpoints(adm, nodeIdentityProvider, nodeOwnerAddresses)
+	addChainRecordEndpoints(adm, chainRecordRegistryProvider)
 	addChainMetricsEndpoints(adm, chainsProvider)
 	addChainEndpoints(adm, &chainWebAPI{
-		registry:   registryProvider,
-		chains:     chainsProvider,
-		network:    network,
-		allMetrics: metrics,
+		chainRecordRegistryProvider: chainRecordRegistryProvider,
+		dkShareRegistryProvider:     dkShareRegistryProvider,
+		nodeIdentityProvider:        nodeIdentityProvider,
+		chains:                      chainsProvider,
+		network:                     network,
+		allMetrics:                  metrics,
 	})
-	addDKSharesEndpoints(adm, registryProvider, nodeProvider)
-	addPeeringEndpoints(adm, network, tnm)
+	addDKSharesEndpoints(adm, dkShareRegistryProvider, nodeProvider)
+	addPeeringEndpoints(adm, chainRecordRegistryProvider, network, tnm)
+	addAccessNodesEndpoints(adm, chainRecordRegistryProvider, tnm)
 }

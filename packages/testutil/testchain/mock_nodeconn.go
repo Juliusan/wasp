@@ -1,11 +1,12 @@
 package testchain
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/iotaledger/hive.go/core/events"
 	"github.com/iotaledger/hive.go/core/logger"
-	"github.com/iotaledger/inx-app/nodebridge"
+	"github.com/iotaledger/inx-app/pkg/nodebridge"
 	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/packages/chain"
 	"github.com/iotaledger/wasp/packages/isc"
@@ -138,4 +139,23 @@ func (mncT *MockedNodeConn) AttachMilestones(handler func(*nodebridge.Milestone)
 
 func (mncT *MockedNodeConn) DetachMilestones(attachID *events.Closure) {
 	mncT.ledgers.DetachMilestones(attachID)
+}
+
+func (mncT *MockedNodeConn) PublishTX(
+	ctx context.Context,
+	chainID *isc.ChainID,
+	tx *iotago.Transaction,
+	callback chain.TxPostHandler,
+) {
+	panic("IMPLEMENT: (mncT *MockedNodeConn) PublishTX") // TODO: Implement.
+}
+
+func (mncT *MockedNodeConn) AttachChain(
+	ctx context.Context,
+	chainID *isc.ChainID,
+	recvRequestCB chain.RequestOutputHandler,
+	recvAliasOutput chain.AliasOutputHandler,
+	recvMilestone chain.MilestoneHandler,
+) {
+	panic("IMPLEMENT: (mncT *MockedNodeConn) AttachChain") // TODO: Implement.
 }

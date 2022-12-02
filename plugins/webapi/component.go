@@ -9,16 +9,15 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pangpanglabs/echoswagger/v2"
-	"github.com/prometheus/tsdb/wal"
 	"go.uber.org/dig"
 
 	"github.com/iotaledger/hive.go/core/app"
 	"github.com/iotaledger/hive.go/core/app/pkg/shutdown"
-	"github.com/iotaledger/inx-app/httpserver"
+	"github.com/iotaledger/inx-app/pkg/httpserver"
 	"github.com/iotaledger/wasp/packages/chains"
+	"github.com/iotaledger/wasp/packages/daemon"
 	"github.com/iotaledger/wasp/packages/dkg"
 	"github.com/iotaledger/wasp/packages/metrics"
-	"github.com/iotaledger/wasp/packages/parameters"
 	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/registry"
 	"github.com/iotaledger/wasp/packages/users"
@@ -75,17 +74,18 @@ func provide(c *dig.Container) error {
 	type webapiServerDeps struct {
 		dig.In
 
-		ShutdownHandler              *shutdown.ShutdownHandler
-		WAL                          *wal.WAL
-		APICacheTTL                  time.Duration `name:"apiCacheTTL"`
-		PublisherPort                int           `name:"publisherPort"`
-		Chains                       *chains.Chains
-		Metrics                      *metrics.Metrics `optional:"true"`
-		DefaultRegistry              registry.Registry
-		DefaultNetworkProvider       peering.NetworkProvider       `name:"defaultNetworkProvider"`
-		DefaultTrustedNetworkManager peering.TrustedNetworkManager `name:"defaultTrustedNetworkManager"`
-		DefaultNode                  *dkg.Node                     `name:"defaultNode"`
-		UserManager                  *users.UserManager
+		ShutdownHandler             *shutdown.ShutdownHandler
+		APICacheTTL                 time.Duration `name:"apiCacheTTL"`
+		PublisherPort               int           `name:"publisherPort"`
+		Chains                      *chains.Chains
+		Metrics                     *metrics.Metrics `optional:"true"`
+		ChainRecordRegistryProvider registry.ChainRecordRegistryProvider
+		DKShareRegistryProvider     registry.DKShareRegistryProvider
+		NodeIdentityProvider        registry.NodeIdentityProvider
+		NetworkProvider             peering.NetworkProvider       `name:"networkProvider"`
+		TrustedNetworkManager       peering.TrustedNetworkManager `name:"trustedNetworkManager"`
+		Node                        *dkg.Node
+		UserManager                 *users.UserManager
 	}
 
 	type webapiServerResult struct {
@@ -117,23 +117,22 @@ func provide(c *dig.Container) error {
 		webapi.Init(
 			Plugin.App().NewLogger("WebAPI"),
 			echoSwagger,
-			deps.DefaultNetworkProvider,
-			deps.DefaultTrustedNetworkManager,
+			deps.NetworkProvider,
+			deps.TrustedNetworkManager,
 			deps.UserManager,
-			func() registry.Registry {
-				return deps.DefaultRegistry
-			},
+			deps.ChainRecordRegistryProvider,
+			deps.DKShareRegistryProvider,
+			deps.NodeIdentityProvider,
 			func() *chains.Chains {
 				return deps.Chains
 			},
 			func() *dkg.Node {
-				return deps.DefaultNode
+				return deps.Node
 			},
 			func() {
 				deps.ShutdownHandler.SelfShutdown("wasp was shutdown via API", false)
 			},
 			deps.Metrics,
-			deps.WAL,
 			ParamsWebAPI.Auth,
 			ParamsWebAPI.NodeOwnerAddresses,
 			deps.APICacheTTL,
@@ -174,7 +173,7 @@ func run() error {
 		}
 
 		Plugin.LogInfof("Stopping %s server ... done", Plugin.Name)
-	}, parameters.PriorityWebAPI); err != nil {
+	}, daemon.PriorityWebAPI); err != nil {
 		Plugin.LogPanicf("failed to start worker: %s", err)
 	}
 

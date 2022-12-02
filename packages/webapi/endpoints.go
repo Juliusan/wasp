@@ -8,12 +8,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/pangpanglabs/echoswagger/v2"
-	"github.com/prometheus/tsdb/wal"
 
 	loggerpkg "github.com/iotaledger/hive.go/core/logger"
 	"github.com/iotaledger/wasp/packages/authentication"
-	"github.com/iotaledger/wasp/packages/chain/chainutil"
 	"github.com/iotaledger/wasp/packages/chains"
+	"github.com/iotaledger/wasp/packages/chainutil"
 	"github.com/iotaledger/wasp/packages/dkg"
 	metricspkg "github.com/iotaledger/wasp/packages/metrics"
 	"github.com/iotaledger/wasp/packages/peering"
@@ -35,12 +34,13 @@ func Init(
 	network peering.NetworkProvider,
 	tnm peering.TrustedNetworkManager,
 	userManager *users.UserManager,
-	registryProvider registry.Provider,
+	chainRecordRegistryProvider registry.ChainRecordRegistryProvider,
+	dkShareRegistryProvider registry.DKShareRegistryProvider,
+	nodeIdentityProvider registry.NodeIdentityProvider,
 	chainsProvider chains.Provider,
 	nodeProvider dkg.NodeProvider,
 	shutdown admapi.ShutdownFunc,
 	metrics *metricspkg.Metrics,
-	w *wal.WAL,
 	authConfig authentication.AuthConfiguration,
 	nodeOwnerAddresses []string,
 	apiCacheTTL time.Duration,
@@ -77,12 +77,13 @@ func Init(
 		network,
 		tnm,
 		userManager,
-		registryProvider,
+		chainRecordRegistryProvider,
+		dkShareRegistryProvider,
+		nodeIdentityProvider,
 		chainsProvider,
 		nodeProvider,
 		shutdown,
 		metrics,
-		w,
 		authConfig,
 		nodeOwnerAddresses,
 	)

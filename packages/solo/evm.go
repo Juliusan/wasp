@@ -2,6 +2,7 @@ package solo
 
 import (
 	"crypto/ecdsa"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -9,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/iotaledger/wasp/packages/chain/chainutil"
+	"github.com/iotaledger/wasp/packages/chainutil"
 	"github.com/iotaledger/wasp/packages/evm/evmtypes"
 	"github.com/iotaledger/wasp/packages/evm/jsonrpc"
 	"github.com/iotaledger/wasp/packages/isc"
@@ -18,6 +19,7 @@ import (
 	"github.com/iotaledger/wasp/packages/parameters"
 	"github.com/iotaledger/wasp/packages/util"
 	"github.com/iotaledger/wasp/packages/vm/core/evm"
+	"github.com/iotaledger/wasp/packages/vm/core/governance"
 )
 
 type jsonRPCSoloBackend struct {
@@ -38,8 +40,12 @@ func (b *jsonRPCSoloBackend) EVMEstimateGas(callMsg ethereum.CallMsg) (uint64, e
 	return b.Chain.EstimateGasEthereum(callMsg)
 }
 
+func (b *jsonRPCSoloBackend) EVMGasPrice() *big.Int {
+	return big.NewInt(0)
+}
+
 func (b *jsonRPCSoloBackend) ISCCallView(iscBlockIndex uint32, scName, funName string, args dict.Dict) (dict.Dict, error) {
-	return b.Chain.CallView(scName, funName, args)
+	return b.Chain.CallViewAtBlockIndex(iscBlockIndex, scName, funName, args)
 }
 
 func (b *jsonRPCSoloBackend) ISCLatestBlockIndex() uint32 {
@@ -61,9 +67,9 @@ func (ch *Chain) EVM() *jsonrpc.EVMChain {
 
 func (ch *Chain) EVMGasRatio() util.Ratio32 {
 	// TODO: Cache the gas ratio?
-	ret, err := ch.CallView(evm.Contract.Name, evm.FuncGetGasRatio.Name)
+	ret, err := ch.CallView(governance.Contract.Name, governance.ViewGetEVMGasRatio.Name)
 	require.NoError(ch.Env.T, err)
-	return codec.MustDecodeRatio32(ret.MustGet(evm.FieldResult))
+	return codec.MustDecodeRatio32(ret.MustGet(governance.ParamEVMGasRatio))
 }
 
 func (ch *Chain) PostEthereumTransaction(tx *types.Transaction) (dict.Dict, error) {

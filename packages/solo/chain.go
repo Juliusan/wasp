@@ -15,7 +15,6 @@ import (
 	"github.com/iotaledger/hive.go/core/events"
 	iotago "github.com/iotaledger/iota.go/v3"
 	"github.com/iotaledger/wasp/packages/chain"
-	"github.com/iotaledger/wasp/packages/chain/messages"
 	"github.com/iotaledger/wasp/packages/cryptolib"
 	"github.com/iotaledger/wasp/packages/hashing"
 	"github.com/iotaledger/wasp/packages/isc"
@@ -615,11 +614,6 @@ func (*Chain) DetachFromRequestProcessed(attachID *events.Closure) {
 	panic("unimplemented")
 }
 
-// EnqueueOffLedgerRequestMsg implements chain.Chain
-func (*Chain) EnqueueOffLedgerRequestMsg(msg *messages.OffLedgerRequestMsgIn) {
-	panic("unimplemented")
-}
-
 // ResolveError implements chain.Chain
 func (ch *Chain) ResolveError(e *isc.UnresolvedVMError) (*isc.VMError, error) {
 	return ch.ResolveVMError(e), nil
@@ -646,7 +640,7 @@ func (*Chain) GetConsensusWorkflowStatus() chain.ConsensusWorkflowStatus {
 }
 
 // GetNodeConnectionMetrics implements chain.Chain
-func (*Chain) GetNodeConnectionMetrics() nodeconnmetrics.NodeConnectionMessagesMetrics {
+func (*Chain) GetNodeConnectionMetrics() nodeconnmetrics.NodeConnectionMetrics {
 	panic("unimplemented")
 }
 

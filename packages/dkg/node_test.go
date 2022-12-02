@@ -15,6 +15,7 @@ import (
 
 	"github.com/iotaledger/hive.go/core/logger"
 	"github.com/iotaledger/wasp/packages/dkg"
+	"github.com/iotaledger/wasp/packages/registry"
 	"github.com/iotaledger/wasp/packages/tcrypto"
 	"github.com/iotaledger/wasp/packages/testutil"
 	"github.com/iotaledger/wasp/packages/testutil/testlogger"
@@ -40,11 +41,11 @@ func TestBasic(t *testing.T) {
 	//
 	// Initialize the DKG subsystem in each node.
 	dkgNodes := make([]*dkg.Node, len(peerNetIDs))
-	registries := make([]tcrypto.DKShareRegistryProvider, len(peerNetIDs))
+	dkShareRegistryProviders := make([]registry.DKShareRegistryProvider, len(peerNetIDs))
 	for i := range peerNetIDs {
-		registries[i] = testutil.NewDkgRegistryProvider(peerIdentities[i].GetPrivateKey())
+		dkShareRegistryProviders[i] = testutil.NewDkgRegistryProvider(peerIdentities[i].GetPrivateKey())
 		dkgNode, err := dkg.NewNode(
-			peerIdentities[i], networkProviders[i], registries[i],
+			peerIdentities[i], networkProviders[i], dkShareRegistryProviders[i],
 			testlogger.WithLevel(log.With("NetID", peerNetIDs[i]), logger.LevelDebug, false),
 		)
 		require.NoError(t, err)
@@ -69,7 +70,7 @@ func TestBasic(t *testing.T) {
 	// dssPartSigs := make([]*dss.PartialSig, len(peerNetIDs))
 	blsPartSigs := make([][]byte, len(peerNetIDs))
 	var aggrDks tcrypto.DKShare
-	for i, r := range registries {
+	for i, r := range dkShareRegistryProviders {
 		dks, err := r.LoadDKShare(dkShare.GetAddress())
 		if i == 0 {
 			aggrDks = dks

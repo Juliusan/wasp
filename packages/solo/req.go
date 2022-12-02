@@ -439,9 +439,7 @@ func (ch *Chain) ResolveVMError(e *isc.UnresolvedVMError) *isc.VMError {
 // 'paramValue') where 'paramName' is a string and 'paramValue' must be of type
 // accepted by the 'codec' package
 func (ch *Chain) CallView(scName, funName string, params ...interface{}) (dict.Dict, error) {
-	i, err := ch.Store.LatestBlockIndex()
-	require.NoError(ch.Env.T, err)
-	return ch.CallViewAtBlockIndex(i, scName, funName, params...)
+	return ch.CallViewAtBlockIndex(ch.LatestBlockIndex(), scName, funName, params...)
 }
 
 func (ch *Chain) CallViewAtBlockIndex(blockIndex uint32, scName, funName string, params ...interface{}) (dict.Dict, error) {
@@ -513,11 +511,11 @@ func (ch *Chain) GetL1Commitment() *state.L1Commitment {
 	anchorOutput := ch.GetAnchorOutput()
 	ret, err := state.L1CommitmentFromAnchorOutput(anchorOutput.GetAliasOutput())
 	require.NoError(ch.Env.T, err)
-	return &ret
+	return ret
 }
 
 // GetRootCommitment returns the root commitment of the latest state index
-func (ch *Chain) GetRootCommitment() trie.VCommitment {
+func (ch *Chain) GetRootCommitment() trie.Hash {
 	block, err := ch.Store.LatestBlock()
 	require.NoError(ch.Env.T, err)
 	return block.TrieRoot()
