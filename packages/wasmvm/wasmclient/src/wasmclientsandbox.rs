@@ -20,6 +20,7 @@ impl wasmlib::host::ScHost for WasmClientContext {
     fn sandbox(&self, func_num: i32, args: &[u8]) -> Vec<u8> {
         match func_num {
             wasmlib::FN_CALL => return self.fn_call(args),
+            wasmlib::FN_CHAIN_ID => return self.chain_id.to_bytes(),
             wasmlib::FN_POST => return self.fn_post(args),
             wasmlib::FN_UTILS_BECH32_DECODE => return self.fn_utils_bech32_decode(args),
             wasmlib::FN_UTILS_BECH32_ENCODE => return self.fn_utils_bech32_encode(args),
@@ -60,15 +61,12 @@ impl WasmClientSandbox for WasmClientContext {
             &req.params,
         );
 
-        match res {
-            Ok(v) => {
-                return v;
-            }
-            Err(e) => {
-                self.err("fn_call: ", &e);
-                return Vec::new();
-            }
+        if let Err(e) = &res {
+            self.err("fn_call: ", &e);
+            return Vec::new();
         }
+
+        return res.unwrap();
     }
 
     fn fn_post(&self, args: &[u8]) -> Vec<u8> {
@@ -86,6 +84,8 @@ impl WasmClientSandbox for WasmClientContext {
             return Vec::new();
         }
         let sc_assets = wasmlib::ScAssets::new(&req.transfer);
+        let mut nonce = self.nonce.lock().unwrap();
+        *nonce += 1;
         let res = self.svc_client.post_request(
             &self.chain_id,
             &req.contract,
@@ -93,7 +93,7 @@ impl WasmClientSandbox for WasmClientContext {
             &req.params,
             &sc_assets,
             self.key_pair.as_ref().unwrap(),
-            0, // FIXME must use counter
+            *nonce,
         );
 
         match res {
@@ -108,24 +108,39 @@ impl WasmClientSandbox for WasmClientContext {
 
     fn fn_utils_bech32_decode(&self, args: &[u8]) -> Vec<u8> {
         let bech32 = wasmlib::string_from_bytes(args);
-        let addr = codec::bech32_decode(&bech32).unwrap();
-        return addr.to_bytes();
+        match codec::bech32_decode(&bech32) {
+            Ok((hrp, addr)) => {
+                if hrp != self.hrp {
+                    self.err("invalid protocol prefix: ", &hrp);
+                    return Vec::new();
+                }
+                return addr.to_bytes();
+            }
+            Err(e) => {
+                self.err("", &e.to_string());
+                return Vec::new();
+            }
+        }
     }
 
     fn fn_utils_bech32_encode(&self, args: &[u8]) -> Vec<u8> {
         let addr = wasmtypes::address_from_bytes(args);
-        let bech32 = codec::bech32_encode(&addr);
-        return bech32.into_bytes();
+        match codec::bech32_encode(&addr) {
+            Ok(v) => return v.into_bytes(),
+            Err(e) => {
+                self.err("", &e.to_string());
+                return Vec::new();
+            }
+        }
     }
 
     fn fn_utils_hash_name(&self, args: &[u8]) -> Vec<u8> {
-        let s = match std::str::from_utf8(args) {
-            Ok(v) => v,
+        match std::str::from_utf8(args) {
+            Ok(v) => return wasmtypes::hname_from_string(v).to_bytes(),
             Err(e) => {
-                self.err(&format!("invalid hname: {}", e), "");
+                self.err("invalid hname: {}", &e.to_string());
                 return Vec::new();
             }
         };
-        return wasmtypes::hname_from_string(s).to_bytes();
     }
 }
