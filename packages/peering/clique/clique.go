@@ -38,24 +38,27 @@ type Callback func(link map[cryptolib.PublicKeyKey]map[cryptolib.PublicKeyKey]er
 type Clique interface {
 	// The timeout for this operation is taken from the Context deadline.
 	Check(ctx context.Context, nodes []*cryptolib.PublicKey, callback Callback)
+	// Function to run the clique instance
+	Run(ctx context.Context)
 }
 
 type cliqueImpl struct {
-	dist         gpa.GPA
-	requestPipe  pipe.Pipe[*checkRequest]
-	requests     *shrinkingmap.ShrinkingMap[hashing.HashValue, *checkRequest]
-	trustedPipe  pipe.Pipe[[]*peering.TrustedPeer]
-	netRecvPipe  pipe.Pipe[*peering.PeerMessageIn]
-	netPeeringID peering.PeeringID
-	netPeerPubs  map[gpa.NodeID]*cryptolib.PublicKey
-	net          peering.NetworkProvider
-	log          *logger.Logger
+	dist          gpa.GPA
+	requestPipe   pipe.Pipe[*checkRequest]
+	requests      *shrinkingmap.ShrinkingMap[hashing.HashValue, *checkRequest]
+	trustedPipe   pipe.Pipe[[]*peering.TrustedPeer]
+	netRecvPipe   pipe.Pipe[*peering.PeerMessageIn]
+	netPeeringID  peering.PeeringID
+	netPeerPubs   map[gpa.NodeID]*cryptolib.PublicKey
+	netAttachID   interface{}
+	net           peering.NetworkProvider
+	trustedCancel context.CancelFunc
+	log           *logger.Logger
 }
 
 var _ Clique = &cliqueImpl{}
 
 func New(
-	ctx context.Context,
 	nodeIdentity *cryptolib.KeyPair,
 	net peering.NetworkProvider,
 	tns peering.TrustedNetworkManager,
@@ -75,17 +78,16 @@ func New(
 		log:          log,
 	}
 	netRecvPipeInCh := ci.netRecvPipe.In()
-	netAttachID := net.Attach(&netPeeringID, peering.PeerMessageReceiverClique, func(recv *peering.PeerMessageIn) {
+	ci.netAttachID = net.Attach(&netPeeringID, peering.PeerMessageReceiverClique, func(recv *peering.PeerMessageIn) {
 		if recv.MsgType != msgTypeCliqueChecker {
 			ci.log.Warnf("Unexpected message, type=%v", recv.MsgType)
 			return
 		}
 		netRecvPipeInCh <- recv
 	})
-	trustedCancel := tns.TrustedPeersListener(func(trustedPeers []*peering.TrustedPeer) {
+	ci.trustedCancel = tns.TrustedPeersListener(func(trustedPeers []*peering.TrustedPeer) {
 		ci.trustedPipe.In() <- trustedPeers
 	})
-	go ci.run(ctx, netAttachID, trustedCancel)
 	return ci
 }
 
@@ -100,7 +102,7 @@ func (ci *cliqueImpl) Check(ctx context.Context, nodes []*cryptolib.PublicKey, c
 	ci.requestPipe.In() <- newCheckRequest(ctx, nodes, now, timeout, callback)
 }
 
-func (ci *cliqueImpl) run(ctx context.Context, netAttachID interface{}, trustedCancel context.CancelFunc) {
+func (ci *cliqueImpl) Run(ctx context.Context) {
 	requestPipeOutCh := ci.requestPipe.Out()
 	trustedPipeOutCh := ci.trustedPipe.Out()
 	netRecvPipeOutCh := ci.netRecvPipe.Out()
@@ -128,8 +130,8 @@ func (ci *cliqueImpl) run(ctx context.Context, netAttachID interface{}, trustedC
 		case timestamp := <-distTimeTicker.C:
 			ci.handleDistTimeTick(timestamp)
 		case <-ctx.Done():
-			ci.net.Detach(netAttachID)
-			trustedCancel()
+			ci.net.Detach(ci.netAttachID)
+			ci.trustedCancel()
 			return
 		}
 	}

@@ -47,7 +47,8 @@ func TestBasic(t *testing.T) {
 
 	cliqueCheckers := make([]clique.Clique, len(peerIdentities))
 	for i := range cliqueCheckers {
-		cliqueCheckers[i] = clique.New(ctx, peerIdentities[i], networkProviders[i], tns[i], log.Named(fmt.Sprintf("N#%v", i)))
+		cliqueCheckers[i] = clique.New(peerIdentities[i], networkProviders[i], tns[i], log.Named(fmt.Sprintf("N#%v", i)))
+		go cliqueCheckers[i].Run(ctx)
 	}
 	time.Sleep(20 * time.Millisecond) // Wait until trusted peers are received.
 

@@ -4,11 +4,14 @@
 package peering
 
 import (
+	"context"
+
 	"go.uber.org/dig"
 
 	"github.com/iotaledger/hive.go/core/app"
 	"github.com/iotaledger/wasp/packages/daemon"
 	"github.com/iotaledger/wasp/packages/peering"
+	"github.com/iotaledger/wasp/packages/peering/clique"
 	"github.com/iotaledger/wasp/packages/peering/lpp"
 	"github.com/iotaledger/wasp/packages/registry"
 )
@@ -34,6 +37,7 @@ type dependencies struct {
 	dig.In
 
 	NetworkProvider peering.NetworkProvider `name:"networkProvider"`
+	Clique          clique.Clique           `name:"clique"`
 }
 
 func provide(c *dig.Container) error {
@@ -49,24 +53,29 @@ func provide(c *dig.Container) error {
 
 		NetworkProvider       peering.NetworkProvider       `name:"networkProvider"`
 		TrustedNetworkManager peering.TrustedNetworkManager `name:"trustedNetworkManager"`
+		Clique                clique.Clique                 `name:"clique"`
 	}
 
 	if err := c.Provide(func(deps networkDeps) networkResult {
+		nodeIdentity := deps.NodeIdentityProvider.NodeIdentity()
+		log := CoreComponent.Logger()
 		netImpl, tnmImpl, err := lpp.NewNetworkProvider(
 			ParamsPeering.NetID,
 			ParamsPeering.Port,
-			deps.NodeIdentityProvider.NodeIdentity(),
+			nodeIdentity,
 			deps.TrustedPeersRegistryProvider,
-			CoreComponent.Logger(),
+			log,
 		)
 		if err != nil {
 			CoreComponent.LogPanicf("Init.peering: %v", err)
 		}
+		clique := clique.New(nodeIdentity, netImpl, tnmImpl, log)
 		CoreComponent.LogInfof("------------- NetID is %s ------------------", ParamsPeering.NetID)
 
 		return networkResult{
 			NetworkProvider:       netImpl,
 			TrustedNetworkManager: tnmImpl,
+			Clique:                clique,
 		}
 	}); err != nil {
 		CoreComponent.LogPanic(err)
@@ -78,7 +87,10 @@ func provide(c *dig.Container) error {
 func run() error {
 	err := CoreComponent.Daemon().BackgroundWorker(
 		"WaspPeering",
-		deps.NetworkProvider.Run,
+		func(ctx context.Context) {
+			go deps.NetworkProvider.Run(ctx)
+			go deps.Clique.Run(ctx)
+		},
 		daemon.PriorityPeering,
 	)
 	if err != nil {
