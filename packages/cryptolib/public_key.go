@@ -107,3 +107,7 @@ func (pkT *PublicKey) Verify(message, sig []byte) bool {
 func (pkT *PublicKey) String() string {
 	return iotago.EncodeHex(pkT.key)
 }
+
+func (pkkT PublicKeyKey) AsPublicKey() *PublicKey {
+	return &PublicKey{key: pkkT[:]}
+}

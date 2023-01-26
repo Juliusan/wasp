@@ -22,3 +22,21 @@ type PeeringTrustRequest struct {
 	PublicKey string `json:"publicKey" swagger:"desc(The peers public key encoded in Hex)"`
 	NetID     string `json:"netId" swagger:"desc(The NetID of the peer)"`
 }
+
+type PeeringConnectedRequest struct {
+	PublicKeys []string `json:"publicKeys" swagger:"desc(The list of peers public keys encoded in Hex)"`
+}
+
+type PeeringConnectedResponse struct {
+	Sources []PeeringConnectedResponseSinglePeer `json:"sources" swagger:"desc(List of source peers)"`
+}
+
+type PeeringConnectedResponseSinglePeer struct {
+	PublicKey    string                                          `json:"publicKey" swagger:"desc(The public key encoded in Hex of source peer)"`
+	Destinations []PeeringConnectedResponseSinglePeerDestination `json:"destinations" swagger:"desc(The list of destination peers)"`
+}
+
+type PeeringConnectedResponseSinglePeerDestination struct {
+	PublicKey  string `json:"publicKey" swagger:"desc(The public key encoded in Hex of destination node)"`
+	FailReason string `json:"failReason,omitempty" swagger:"desc(Empty, source peer is connected to destination; error message if there is a problem in connection)"`
+}

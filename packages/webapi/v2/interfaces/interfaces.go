@@ -77,6 +77,7 @@ type PeeringService interface {
 	GetIdentity() *dto.PeeringNodeIdentity
 	GetRegisteredPeers() []*dto.PeeringNodeStatus
 	GetTrustedPeers() ([]*dto.PeeringNodeIdentity, error)
+	CheckConnectedPeers(ctx context.Context, publicKeys []*cryptolib.PublicKey) map[cryptolib.PublicKeyKey]map[cryptolib.PublicKeyKey]error
 	IsPeerTrusted(publicKey *cryptolib.PublicKey) error
 	TrustPeer(peer *cryptolib.PublicKey, netID string) (*dto.PeeringNodeIdentity, error)
 }

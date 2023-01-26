@@ -21,6 +21,7 @@ import (
 	"github.com/iotaledger/wasp/packages/dkg"
 	"github.com/iotaledger/wasp/packages/metrics/nodeconnmetrics"
 	"github.com/iotaledger/wasp/packages/peering"
+	"github.com/iotaledger/wasp/packages/peering/clique"
 	"github.com/iotaledger/wasp/packages/registry"
 	"github.com/iotaledger/wasp/packages/users"
 	"github.com/iotaledger/wasp/packages/webapi"
@@ -89,6 +90,7 @@ func provide(c *dig.Container) error {
 		NodeIdentityProvider        registry.NodeIdentityProvider
 		NetworkProvider             peering.NetworkProvider       `name:"networkProvider"`
 		TrustedNetworkManager       peering.TrustedNetworkManager `name:"trustedNetworkManager"`
+		Clique                      clique.Clique                 `name:"clique"`
 		Node                        *dkg.Node
 		UserManager                 *users.UserManager
 	}
@@ -182,6 +184,7 @@ func provide(c *dig.Container) error {
 			deps.AppConfig,
 			deps.NetworkProvider,
 			deps.TrustedNetworkManager,
+			deps.Clique,
 			deps.UserManager,
 			deps.ChainRecordRegistryProvider,
 			deps.DKShareRegistryProvider,

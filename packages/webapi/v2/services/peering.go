@@ -1,9 +1,12 @@
 package services
 
 import (
+	"context"
+
 	"github.com/iotaledger/wasp/packages/chains"
 	"github.com/iotaledger/wasp/packages/cryptolib"
 	"github.com/iotaledger/wasp/packages/peering"
+	"github.com/iotaledger/wasp/packages/peering/clique"
 	"github.com/iotaledger/wasp/packages/webapi/v2/dto"
 )
 
@@ -11,13 +14,20 @@ type PeeringService struct {
 	chainsProvider        chains.Provider
 	networkProvider       peering.NetworkProvider
 	trustedNetworkManager peering.TrustedNetworkManager
+	clique                clique.Clique
 }
 
-func NewPeeringService(chainsProvider chains.Provider, networkProvider peering.NetworkProvider, trustedNetworkManager peering.TrustedNetworkManager) *PeeringService {
+func NewPeeringService(
+	chainsProvider chains.Provider,
+	networkProvider peering.NetworkProvider,
+	trustedNetworkManager peering.TrustedNetworkManager,
+	clique clique.Clique,
+) *PeeringService {
 	return &PeeringService{
 		chainsProvider:        chainsProvider,
 		networkProvider:       networkProvider,
 		trustedNetworkManager: trustedNetworkManager,
+		clique:                clique,
 	}
 }
 
@@ -101,4 +111,12 @@ func (p *PeeringService) DistrustPeer(publicKey *cryptolib.PublicKey) (*dto.Peer
 
 func (p *PeeringService) IsPeerTrusted(publicKey *cryptolib.PublicKey) error {
 	return p.trustedNetworkManager.IsTrustedPeer(publicKey)
+}
+
+func (p *PeeringService) CheckConnectedPeers(ctx context.Context, publicKeys []*cryptolib.PublicKey) map[cryptolib.PublicKeyKey]map[cryptolib.PublicKeyKey]error {
+	resultCh := make(chan map[cryptolib.PublicKeyKey]map[cryptolib.PublicKeyKey]error)
+	p.clique.Check(ctx, publicKeys, func(result map[cryptolib.PublicKeyKey]map[cryptolib.PublicKeyKey]error) {
+		resultCh <- result
+	})
+	return <-resultCh
 }

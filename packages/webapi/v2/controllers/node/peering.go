@@ -57,6 +57,49 @@ func (c *Controller) getIdentity(e echo.Context) error {
 	return e.JSON(http.StatusOK, peerModel)
 }
 
+func (c *Controller) checkConnectedPeers(e echo.Context) error {
+	var ccr models.PeeringConnectedRequest
+	var err error
+
+	if err = e.Bind(&ccr); err != nil {
+		return apierrors.InvalidPropertyError("body", err)
+	}
+
+	publicKeys := make([]*cryptolib.PublicKey, len(ccr.PublicKeys))
+	for i := range publicKeys {
+		publicKeys[i], err = cryptolib.NewPublicKeyFromString(ccr.PublicKeys[i])
+		if err != nil {
+			return apierrors.InvalidPropertyError("publicKey", err)
+		}
+	}
+
+	connections := c.peeringService.CheckConnectedPeers(e.Request().Context(), publicKeys)
+
+	i := 0
+	connectedPeersModel := models.PeeringConnectedResponse{
+		Sources: make([]models.PeeringConnectedResponseSinglePeer, len(connections)),
+	}
+	for publicKeyKey, destinations := range connections {
+		connectedPeersModel.Sources[i] = models.PeeringConnectedResponseSinglePeer{
+			PublicKey:    publicKeyKey.AsPublicKey().String(),
+			Destinations: make([]models.PeeringConnectedResponseSinglePeerDestination, len(destinations)),
+		}
+		j := 0
+		for dPublicKeyKey, err := range destinations {
+			connectedPeersModel.Sources[i].Destinations[j] = models.PeeringConnectedResponseSinglePeerDestination{
+				PublicKey: dPublicKeyKey.AsPublicKey().String(),
+			}
+			if err != nil {
+				connectedPeersModel.Sources[i].Destinations[j].FailReason = err.Error()
+			}
+			j++
+		}
+		i++
+	}
+
+	return e.JSON(http.StatusOK, connectedPeersModel)
+}
+
 func (c *Controller) trustPeer(e echo.Context) error {
 	var trustedPeer models.PeeringTrustRequest
 
