@@ -2,6 +2,7 @@ package node
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -58,16 +59,12 @@ func (c *Controller) getIdentity(e echo.Context) error {
 }
 
 func (c *Controller) checkConnectedPeers(e echo.Context) error {
-	var ccr models.PeeringConnectedRequest
 	var err error
+	publicKeysStr := strings.Split(e.QueryParam("publicKeys"), ",")
 
-	if err = e.Bind(&ccr); err != nil {
-		return apierrors.InvalidPropertyError("body", err)
-	}
-
-	publicKeys := make([]*cryptolib.PublicKey, len(ccr.PublicKeys))
+	publicKeys := make([]*cryptolib.PublicKey, len(publicKeysStr))
 	for i := range publicKeys {
-		publicKeys[i], err = cryptolib.NewPublicKeyFromString(ccr.PublicKeys[i])
+		publicKeys[i], err = cryptolib.NewPublicKeyFromString(publicKeysStr[i])
 		if err != nil {
 			return apierrors.InvalidPropertyError("publicKey", err)
 		}

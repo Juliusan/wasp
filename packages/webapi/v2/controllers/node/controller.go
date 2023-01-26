@@ -56,7 +56,7 @@ func (c *Controller) RegisterAdmin(adminAPI echoswagger.ApiGroup, mocker interfa
 		SetOperationId("getTrustedPeers")
 
 	adminAPI.GET("node/peers/connected", c.checkConnectedPeers, authentication.ValidatePermissions([]string{permissions.Read})).
-		AddParamBody(mocker.Get(models.PeeringConnectedRequest{}), "", "List of peers to check if they are inter-connected", true).
+		AddParamQuery("", "publicKeys", "List of peers to check if they are inter-connected", true).
 		AddResponse(http.StatusUnauthorized, "Unauthorized (Wrong permissions, missing token)", authentication.ValidationError{}, nil).
 		AddResponse(http.StatusOK, "A map of inter-peer connection", mocker.Get([]models.PeeringConnectedResponse{}), nil).
 		SetSummary("Get inter-connected peers").
