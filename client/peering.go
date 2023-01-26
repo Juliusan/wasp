@@ -5,9 +5,11 @@ package client
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/iotaledger/wasp/packages/webapi/v1/model"
 	"github.com/iotaledger/wasp/packages/webapi/v1/routes"
+	"github.com/iotaledger/wasp/packages/webapi/v2/models"
 )
 
 func (c *WaspClient) GetPeeringSelf() (*model.PeeringTrustedNode, error) {
@@ -25,6 +27,12 @@ func (c *WaspClient) GetPeeringTrustedList() ([]*model.PeeringTrustedNode, error
 func (c *WaspClient) GetPeeringTrusted(pubKey string) (*model.PeeringTrustedNode, error) {
 	var response *model.PeeringTrustedNode
 	err := c.do(http.MethodGet, routes.PeeringTrustedGet(pubKey), nil, &response)
+	return response, err
+}
+
+func (c *WaspClient) CheckConnectedPeers(pubKeys []string) (*models.PeeringConnectedResponse, error) {
+	var response *models.PeeringConnectedResponse
+	err := c.do(http.MethodGet, "v2/node/peers/connected?publicKeys="+strings.Join(pubKeys, ","), nil, &response)
 	return response, err
 }
 
