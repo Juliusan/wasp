@@ -4,7 +4,8 @@ ARG GOLANG_IMAGE_TAG=1.19-bullseye
 # Build stage
 FROM golang:${GOLANG_IMAGE_TAG} AS build
 ARG BUILD_TAGS=rocksdb
-ARG BUILD_LD_FLAGS=""
+#ARG GIT_REF_TAG="$(git describe --tags)"
+#ARG BUILD_LD_FLAGS="-X=github.com/iotaledger/wasp/core/app.Version=${GIT_REF_TAG}"
 
 LABEL org.label-schema.description="Wasp"
 LABEL org.label-schema.name="iotaledger/wasp"
@@ -30,7 +31,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
   go mod download
 
 # Project build stage
+RUN echo COOL
 COPY . .
+
+ARG GIT_REF_TAG="something"
+ARG BUILD_LD_FLAGS="-X=github.com/iotaledger/wasp/core/app.Version=${GIT_REF_TAG}"
+RUN echo ${GIT_REF_TAG}
+
+#RUN ls -a && exit 1
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
   --mount=type=cache,target=/root/go/pkg/mod \

@@ -1,8 +1,10 @@
 package node
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -60,22 +62,30 @@ func (c *Controller) getIdentity(e echo.Context) error {
 
 func (c *Controller) checkConnectedPeers(e echo.Context) error {
 	var err error
+	fmt.Printf("XXX KUKU0 %v\n", time.Now())
 	publicKeysStr := strings.Split(e.QueryParam("publicKeys"), ",")
+	fmt.Printf("XXX KUKU1 BIND %v\n", publicKeysStr)
 
 	publicKeys := make([]*cryptolib.PublicKey, len(publicKeysStr))
+	fmt.Printf("XXX KUKU2 RESP %v\n", publicKeys)
 	for i := range publicKeys {
+		fmt.Printf("XXX KUKU3 PUBLIC KEY %v\n", i)
 		publicKeys[i], err = cryptolib.NewPublicKeyFromString(publicKeysStr[i])
+		fmt.Printf("XXX KUKU4 PUBLIC KEY %v %v %v\n", i, publicKeys[i], err)
 		if err != nil {
 			return apierrors.InvalidPropertyError("publicKey", err)
 		}
 	}
+	fmt.Printf("XXX KUKU5 PUBLIC KEYS %v\n", publicKeys)
 
 	connections := c.peeringService.CheckConnectedPeers(e.Request().Context(), publicKeys)
+	fmt.Printf("XXX KUKU6 CONNECTIONS %v\n", connections)
 
 	i := 0
 	connectedPeersModel := models.PeeringConnectedResponse{
 		Sources: make([]models.PeeringConnectedResponseSinglePeer, len(connections)),
 	}
+	fmt.Printf("XXX KUKU7 RESP INIT %v\n", connectedPeersModel)
 	for publicKeyKey, destinations := range connections {
 		connectedPeersModel.Sources[i] = models.PeeringConnectedResponseSinglePeer{
 			PublicKey:    publicKeyKey.AsPublicKey().String(),
@@ -93,6 +103,7 @@ func (c *Controller) checkConnectedPeers(e echo.Context) error {
 		}
 		i++
 	}
+	fmt.Printf("XXX KUKU7 RESP FINAL %v\n", connectedPeersModel)
 
 	return e.JSON(http.StatusOK, connectedPeersModel)
 }

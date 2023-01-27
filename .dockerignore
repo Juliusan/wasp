@@ -1,5 +1,5 @@
 .*
-.git
+!.git
 .github
 .github
 .idea
@@ -29,4 +29,3 @@ wasp
 wasp-cli
 wasp-cluster
 waspdb
-

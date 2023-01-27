@@ -57,9 +57,9 @@ func initConnectedCmd() *cobra.Command {
 			// Fill table header column and table header rows
 			result := make([][]string, len(resPubKeys))
 			for i := range resPubKeys {
-				header[i+2] = fmt.Sprint(i)
+				header[i+2] = fmt.Sprint(i + 1)
 				result[i] = make([]string, len(resPubKeys)+2)
-				result[i][0] = fmt.Sprint(i)
+				result[i][0] = fmt.Sprint(i + 1)
 				result[i][1] = resPubKeys[i]
 			}
 			// Fill table data
