@@ -9,6 +9,7 @@ import (
 	"github.com/iotaledger/hive.go/log"
 	"github.com/iotaledger/wasp/packages/metrics"
 	"github.com/iotaledger/wasp/packages/state"
+	"github.com/iotaledger/wasp/packages/util/time_util"
 )
 
 type blockTime struct {
@@ -22,13 +23,13 @@ type blockCache struct {
 	maxCacheSize int
 	wal          BlockWAL
 	times        []*blockTime
-	timeProvider TimeProvider
+	timeProvider time_util.TimeProvider
 	metrics      *metrics.ChainStateManagerMetrics
 }
 
 var _ BlockCache = &blockCache{}
 
-func NewBlockCache(tp TimeProvider, maxCacheSize int, wal BlockWAL, metrics *metrics.ChainStateManagerMetrics, log log.Logger) (BlockCache, error) {
+func NewBlockCache(tp time_util.TimeProvider, maxCacheSize int, wal BlockWAL, metrics *metrics.ChainStateManagerMetrics, log log.Logger) (BlockCache, error) {
 	return &blockCache{
 		log:          log.NewChildLogger("BC"),
 		blocks:       shrinkingmap.New[BlockKey, state.Block](),

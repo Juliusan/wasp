@@ -13,6 +13,7 @@ import (
 	"github.com/iotaledger/wasp/packages/state"
 	"github.com/iotaledger/wasp/packages/testutil/testlogger"
 	"github.com/iotaledger/wasp/packages/util"
+	"github.com/iotaledger/wasp/packages/util/time_util"
 )
 
 func TestBlockCacheSimple(t *testing.T) {
@@ -20,7 +21,7 @@ func TestBlockCacheSimple(t *testing.T) {
 
 	factory := NewBlockFactory(t)
 	blocks := factory.GetBlocks(4, 1)
-	blockCache, err := NewBlockCache(NewDefaultTimeProvider(), 100, NewEmptyTestBlockWAL(), mockStateManagerMetrics(), log)
+	blockCache, err := NewBlockCache(time_util.NewDefaultTimeProvider(), 100, NewEmptyTestBlockWAL(), mockStateManagerMetrics(), log)
 	require.NoError(t, err)
 	blockCache.AddBlock(blocks[0])
 	blockCache.AddBlock(blocks[1])
@@ -36,7 +37,7 @@ func TestBlockCacheCleaning(t *testing.T) {
 
 	factory := NewBlockFactory(t)
 	blocks := factory.GetBlocks(6, 2)
-	blockCache, err := NewBlockCache(NewDefaultTimeProvider(), 100, NewEmptyTestBlockWAL(), mockStateManagerMetrics(), log)
+	blockCache, err := NewBlockCache(time_util.NewDefaultTimeProvider(), 100, NewEmptyTestBlockWAL(), mockStateManagerMetrics(), log)
 	require.NoError(t, err)
 
 	beforeTime := time.Now()
@@ -82,7 +83,7 @@ func TestBlockCacheSameBlockCleaning(t *testing.T) {
 
 	factory := NewBlockFactory(t)
 	blocks := factory.GetBlocks(3, 2)
-	blockCache, err := NewBlockCache(NewDefaultTimeProvider(), 100, NewEmptyTestBlockWAL(), mockStateManagerMetrics(), log)
+	blockCache, err := NewBlockCache(time_util.NewDefaultTimeProvider(), 100, NewEmptyTestBlockWAL(), mockStateManagerMetrics(), log)
 	require.NoError(t, err)
 	blockCache.AddBlock(blocks[0])
 	blockCache.AddBlock(blocks[1])
@@ -114,7 +115,7 @@ func TestBlockCacheWAL(t *testing.T) {
 	factory := NewBlockFactory(t)
 	blocks := factory.GetBlocks(3, 2)
 	wal := NewMockedTestBlockWAL()
-	blockCache, err := NewBlockCache(NewDefaultTimeProvider(), 100, wal, mockStateManagerMetrics(), log)
+	blockCache, err := NewBlockCache(time_util.NewDefaultTimeProvider(), 100, wal, mockStateManagerMetrics(), log)
 	require.NoError(t, err)
 	blockCache.AddBlock(blocks[0])
 	blockCache.AddBlock(blocks[1])
@@ -138,7 +139,7 @@ func TestBlockCacheCleanUp(t *testing.T) {
 	blocks := factory.GetBlocks(16, 2)
 	now := time.Now()
 	wal := NewEmptyTestBlockWAL()
-	tp := NewArtifficialTimeProvider(now)
+	tp := time_util.NewArtifficialTimeProvider(now)
 	blockCache, err := NewBlockCache(tp, 5, wal, mockStateManagerMetrics(), log)
 	require.NoError(t, err)
 	setNowAddBlockFun := func(d time.Duration, b state.Block) {
@@ -213,7 +214,7 @@ func TestBlockCacheFull(t *testing.T) {
 	blocks := factory.GetBlocks(5, 2)
 	now := time.Now()
 	wal := NewMockedTestBlockWAL()
-	tp := NewArtifficialTimeProvider(now)
+	tp := time_util.NewArtifficialTimeProvider(now)
 	blockCache, err := NewBlockCache(tp, 100, wal, mockStateManagerMetrics(), log)
 	require.NoError(t, err)
 	blockCache.AddBlock(blocks[0]) // Will be dropped from cache AND WAL
