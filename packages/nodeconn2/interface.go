@@ -55,8 +55,6 @@ type NodeConnection interface {
 		//onChainConnect func(),
 		//onChainDisconnect func(),
 	) ChainNodeConnection
-
-	chainNodeConnStopped(chainID isc.ChainID)
 }
 
 var ErrOperationAborted = errors.New("operation was aborted")

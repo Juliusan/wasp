@@ -17,9 +17,14 @@ type chainNodeConn struct {
 	chainID            isc.ChainID
 	chainOutputHandler ChainOutputHandler
 	otherOutputHandler OtherOutputHandler
+	chainStopHandler   chainStopHandler
 
 	outputsReceivedPipe pipe.Pipe[*chainNodeConnOutputsReceivedData]
 }
+
+type (
+	chainStopHandler func()
+)
 
 var _ ChainNodeConnection = &chainNodeConn{}
 
@@ -30,6 +35,7 @@ func newChainNodeConn(
 	indexerClient nodeclient.IndexerClient,
 	chainOutputHandler ChainOutputHandler,
 	otherOutputHandler OtherOutputHandler,
+	chainStopHandler chainStopHandler,
 ) ChainNodeConnection {
 	// TODO
 	result := &chainNodeConn{
@@ -39,6 +45,7 @@ func newChainNodeConn(
 		indexerClient:       indexerClient,
 		chainOutputHandler:  chainOutputHandler,
 		otherOutputHandler:  otherOutputHandler,
+		chainStopHandler:    chainStopHandler,
 		outputsReceivedPipe: pipe.NewInfinitePipe[*chainNodeConnOutputsReceivedData](),
 	}
 	go result.initAndRun()
@@ -49,6 +56,11 @@ func (cnc *chainNodeConn) initAndRun() {
 	err := cnc.initialise()
 	if err == nil {
 		cnc.run()
+	} else {
+		// TODO: possible race condition: if nodeconn is not fast enough to add chain nodeconn to its map,
+		// this function (which aims at deleting it) might be called earlier, causing this chain nodeconn
+		// to be included in nodeconn's map forever. See, if this happens.
+		cnc.chainStopHandler()
 	}
 }
 
@@ -122,7 +134,7 @@ func (cnc *chainNodeConn) outputsReceived(
 }
 
 func (cnc *chainNodeConn) run() {
-	//defer smT.cleanupFun()
+	defer cnc.chainStopHandler()
 	outputsReceivedPipeCh := cnc.outputsReceivedPipe.Out()
 	//timerTickCh := smT.parameters.TimeProvider.After(smT.parameters.StateManagerTimerTickPeriod)
 	//statusTimerCh := smT.parameters.TimeProvider.After(constStatusTimerTime)

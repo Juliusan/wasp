@@ -163,13 +163,10 @@ func (nc *nodeConn) AttachChain(
 	chainOutputHandler ChainOutputHandler,
 	otherOutputHandler OtherOutputHandler,
 ) ChainNodeConnection {
-	cnc := newChainNodeConn(ctx, nc.log, chainID, nc.indexerClient, chainOutputHandler, otherOutputHandler)
+	chainStopHandler := func() { nc.stoppedChainPipe.In() <- chainID }
+	cnc := newChainNodeConn(ctx, nc.log, chainID, nc.indexerClient, chainOutputHandler, otherOutputHandler, chainStopHandler)
 	nc.newChainPipe.In() <- cnc
 	return cnc
-}
-
-func (nc *nodeConn) chainNodeConnStopped(chainID isc.ChainID) {
-	nc.stoppedChainPipe.In() <- chainID
 }
 
 func (nc *nodeConn) run() {
@@ -227,10 +224,12 @@ func (nc *nodeConn) run() {
 }
 
 func (nc *nodeConn) handleNewChain(chainNodeConn ChainNodeConnection) {
+	nc.log.LogDebugf("Chain %s started", chainNodeConn.GetChainID())
 	nc.chainNodeConns[chainNodeConn.GetChainID()] = chainNodeConn
 }
 
 func (nc *nodeConn) handleStoppedChain(chainID isc.ChainID) {
+	nc.log.LogDebugf("Chain %s stopped", chainID)
 	delete(nc.chainNodeConns, chainID)
 }
 
