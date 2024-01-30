@@ -21,7 +21,6 @@ type nodeConn struct {
 	ctx             context.Context
 	log             log.Logger
 	nodeBridge      nodebridge.NodeBridge
-	indexerClient   nodeclient.IndexerClient
 	inxNodeClient   *nodeclient.Client
 	chainNodeConns  map[isc.ChainID]ChainNodeConnection
 	shutdownHandler *shutdown.ShutdownHandler
@@ -40,11 +39,6 @@ func NewNodeConn(
 	shutdownHandler *shutdown.ShutdownHandler,
 ) (NodeConnection, error) {
 	ncLog := log.NewChildLogger("nc")
-	indexerClient, err := nodeBridge.Indexer(ctx)
-	if err != nil {
-		ncLog.LogErrorf("Failed to get indexer client: %v", err)
-		return nil, err
-	}
 	inxNodeClient, err := nodeBridge.INXNodeClient()
 	if err != nil {
 		ncLog.LogErrorf("Failed to get inx node client: %v", err)
@@ -54,7 +48,6 @@ func NewNodeConn(
 		ctx:              ctx,
 		log:              ncLog,
 		nodeBridge:       nodeBridge,
-		indexerClient:    indexerClient,
 		inxNodeClient:    inxNodeClient,
 		chainNodeConns:   make(map[isc.ChainID]ChainNodeConnection),
 		shutdownHandler:  shutdownHandler,
@@ -164,7 +157,7 @@ func (nc *nodeConn) AttachChain(
 	otherOutputHandler OtherOutputHandler,
 ) ChainNodeConnection {
 	chainStopHandler := func() { nc.stoppedChainPipe.In() <- chainID }
-	cnc := newChainNodeConn(ctx, nc.log, chainID, nc.indexerClient, chainOutputHandler, otherOutputHandler, chainStopHandler)
+	cnc := newChainNodeConn(ctx, nc.log, chainID, nc.nodeBridge, chainOutputHandler, otherOutputHandler, chainStopHandler)
 	nc.newChainPipe.In() <- cnc
 	return cnc
 }
