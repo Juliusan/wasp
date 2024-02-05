@@ -98,9 +98,8 @@ func TestLedgerBaseConsistency(t *testing.T) {
 	chainOutputs = ch.GetChainOutputsFromL1()
 	anchorSD = lo.Must(testutil.L1API.StorageScoreStructure().MinDeposit(chainOutputs.AnchorOutput))
 	accountSD := lo.Must(testutil.L1API.StorageScoreStructure().MinDeposit(chainOutputs.MustAccountOutput()))
-	require.EqualValues(t, accountSD, chainOutputs.MustAccountOutput().BaseTokenAmount())
-
-	ch.AssertL2TotalBaseTokens(chainOutputs.AnchorOutput.Amount - anchorSD)
+	require.EqualValues(t, anchorSD, chainOutputs.AnchorOutput.BaseTokenAmount())
+	ch.AssertL2TotalBaseTokens(chainOutputs.MustAccountOutput().Amount - accountSD)
 	ch.AssertControlAddresses()
 }
 
@@ -315,8 +314,8 @@ func TestEstimateGas(t *testing.T) {
 	{
 		keyPair, _ := env.NewKeyPairWithFunds()
 
-		// we can call EstimateGas even with 0 base tokens in L2 account
-		_, estimate, err2 := ch.EstimateGasOffLedger(callParams(), keyPair, true)
+		req := callParams().WithFungibleTokens(isc.NewAssetsBaseTokens(1 * isc.Million)).WithMaxAffordableGasBudget()
+		_, estimate, err2 := ch.EstimateGasOnLedger(req, keyPair)
 		estimatedGas = estimate.GasBurned
 		estimatedGasFee = estimate.GasFeeCharged
 		require.NoError(t, err2)

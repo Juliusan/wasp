@@ -66,11 +66,11 @@ func (e *ChainEnv) getBalanceOnChain(agentID isc.AgentID, assetID []byte, nodeIn
 	}
 
 	balance, _, err := e.Chain.Cluster.WaspClient(idx).CorecontractsApi.
-		AccountsGetAccountBalance(context.Background(), e.Chain.ChainID.String(), agentID.String()).
+		AccountsGetAccountBalance(context.Background(), e.Chain.ChainID.Bech32(e.Clu.L1Client().Bech32HRP()), agentID.Bech32(e.Clu.L1Client().Bech32HRP())).
 		Execute()
 	require.NoError(e.t, err)
 
-	assets, err := apiextensions.AssetsFromAPIResponse(balance)
+	assets, err := apiextensions.FungibleTokensFromAPIResponse(balance)
 	require.NoError(e.t, err)
 
 	if bytes.Equal(assetID, isc.BaseTokenID) {
@@ -96,14 +96,14 @@ func (e *ChainEnv) checkBalanceOnChain(agentID isc.AgentID, assetID []byte, expe
 
 func (e *ChainEnv) getAccountsOnChain() []isc.AgentID {
 	accounts, _, err := e.Chain.Cluster.WaspClient(0).CorecontractsApi.
-		AccountsGetAccounts(context.Background(), e.Chain.ChainID.String()).
+		AccountsGetAccounts(context.Background(), e.Chain.ChainID.Bech32(e.Clu.L1Client().Bech32HRP())).
 		Execute()
 
 	require.NoError(e.t, err)
 
 	ret := make([]isc.AgentID, 0)
 	for _, address := range accounts.Accounts {
-		aid, err2 := isc.AgentIDFromString(address)
+		aid, err2 := isc.AgentIDFromBech32(address, e.Clu.L1Client().Bech32HRP())
 		require.NoError(e.t, err2)
 
 		ret = append(ret, aid)
@@ -113,27 +113,27 @@ func (e *ChainEnv) getAccountsOnChain() []isc.AgentID {
 	return ret
 }
 
-func (e *ChainEnv) getBalancesOnChain() map[string]*isc.Assets {
-	ret := make(map[string]*isc.Assets)
+func (e *ChainEnv) getBalancesOnChain() map[string]*isc.FungibleTokens {
+	ret := make(map[string]*isc.FungibleTokens)
 	acc := e.getAccountsOnChain()
 
 	for _, agentID := range acc {
 		balance, _, err := e.Chain.Cluster.WaspClient().CorecontractsApi.
-			AccountsGetAccountBalance(context.Background(), e.Chain.ChainID.String(), agentID.String()).
+			AccountsGetAccountBalance(context.Background(), e.Chain.ChainID.Bech32(e.Clu.L1Client().Bech32HRP()), agentID.Bech32(e.Clu.L1Client().Bech32HRP())).
 			Execute()
 		require.NoError(e.t, err)
 
-		assets, err := apiextensions.AssetsFromAPIResponse(balance)
+		assets, err := apiextensions.FungibleTokensFromAPIResponse(balance)
 		require.NoError(e.t, err)
 
-		ret[agentID.String()] = assets
+		ret[agentID.Bech32(e.Clu.L1Client().Bech32HRP())] = assets
 	}
 	return ret
 }
 
 func (e *ChainEnv) getAccountNFTs(agentID isc.AgentID) []iotago.NFTID {
 	nftsResp, _, err := e.Chain.Cluster.WaspClient().CorecontractsApi.
-		AccountsGetAccountNFTIDs(context.Background(), e.Chain.ChainID.String(), agentID.String()).
+		AccountsGetAccountNFTIDs(context.Background(), e.Chain.ChainID.Bech32(e.Clu.L1Client().Bech32HRP()), agentID.Bech32(e.Clu.L1Client().Bech32HRP())).
 		Execute()
 	require.NoError(e.t, err)
 
@@ -148,13 +148,13 @@ func (e *ChainEnv) getAccountNFTs(agentID isc.AgentID) []iotago.NFTID {
 	return ret
 }
 
-func (e *ChainEnv) getTotalBalance() *isc.Assets {
+func (e *ChainEnv) getTotalBalance() *isc.FungibleTokens {
 	totalAssets, _, err := e.Chain.Cluster.WaspClient().CorecontractsApi.
-		AccountsGetTotalAssets(context.Background(), e.Chain.ChainID.String()).
+		AccountsGetTotalAssets(context.Background(), e.Chain.ChainID.Bech32(e.Clu.L1Client().Bech32HRP())).
 		Execute()
 	require.NoError(e.t, err)
 
-	assets, err := apiextensions.AssetsFromAPIResponse(totalAssets)
+	assets, err := apiextensions.FungibleTokensFromAPIResponse(totalAssets)
 	require.NoError(e.t, err)
 
 	return assets
@@ -164,9 +164,9 @@ func (e *ChainEnv) printAccounts(title string) {
 	allBalances := e.getBalancesOnChain()
 	s := fmt.Sprintf("------------------------------------- %s\n", title)
 	for k, bals := range allBalances {
-		aid, err := isc.AgentIDFromString(k)
+		aid, err := isc.AgentIDFromBech32(k, e.Clu.L1Client().Bech32HRP())
 		require.NoError(e.t, err)
-		s += fmt.Sprintf("     %s\n", aid.String())
+		s += fmt.Sprintf("     %s\n", aid.Bech32(e.Clu.L1Client().Bech32HRP()))
 		s += fmt.Sprintf("%s\n", bals.String())
 	}
 	fmt.Println(s)
@@ -174,7 +174,7 @@ func (e *ChainEnv) printAccounts(title string) {
 
 func (e *ChainEnv) checkLedger() {
 	balances := e.getBalancesOnChain()
-	sum := isc.NewEmptyAssets()
+	sum := isc.NewEmptyFungibleTokens()
 	for _, bal := range balances {
 		sum.Add(bal)
 	}
@@ -183,14 +183,14 @@ func (e *ChainEnv) checkLedger() {
 
 func (e *ChainEnv) getChainInfo() (isc.ChainID, isc.AgentID) {
 	chainInfo, _, err := e.Chain.Cluster.WaspClient(0).ChainsApi.
-		GetChainInfo(context.Background(), e.Chain.ChainID.String()).
+		GetChainInfo(context.Background(), e.Chain.ChainID.Bech32(e.Clu.L1Client().Bech32HRP())).
 		Execute()
 	require.NoError(e.t, err)
 
-	chainID, err := isc.ChainIDFromString(chainInfo.ChainID)
+	chainID, err := isc.ChainIDFromBech32(chainInfo.ChainID, e.Clu.L1Client().Bech32HRP())
 	require.NoError(e.t, err)
 
-	ownerID, err := isc.AgentIDFromString(chainInfo.ChainOwnerId)
+	ownerID, err := isc.AgentIDFromBech32(chainInfo.ChainOwnerId, e.Clu.L1Client().Bech32HRP())
 	require.NoError(e.t, err)
 
 	return chainID, ownerID
@@ -212,7 +212,7 @@ func (e *ChainEnv) findContract(name string, nodeIndex ...int) (*root.ContractRe
 	ret, err := apiextensions.CallView(
 		context.Background(),
 		e.Chain.Cluster.WaspClient(i),
-		e.Chain.ChainID.String(),
+		e.Chain.ChainID.Bech32(e.Clu.L1Client().Bech32HRP()),
 		apiclient.ContractCallViewRequest{
 			ContractHName: root.Contract.Hname().String(),
 			FunctionHName: root.ViewFindContract.Hname().String(),
@@ -248,7 +248,7 @@ func (e *ChainEnv) counterEquals(expected int64) conditionFn {
 		ret, err := apiextensions.CallView(
 			context.Background(),
 			e.Chain.Cluster.WaspClient(nodeIndex),
-			e.Chain.ChainID.String(),
+			e.Chain.ChainID.Bech32(e.Clu.L1Client().Bech32HRP()),
 			apiclient.ContractCallViewRequest{
 				ContractHName: inccounter.Contract.Hname().String(),
 				FunctionHName: inccounter.ViewGetCounter.Hname().String(),

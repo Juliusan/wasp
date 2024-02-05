@@ -5,37 +5,30 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"github.com/pangpanglabs/echoswagger/v2"
 	"go.uber.org/dig"
-	websocketserver "nhooyr.io/websocket"
 
 	"github.com/iotaledger/hive.go/app"
 	"github.com/iotaledger/hive.go/app/configuration"
 	"github.com/iotaledger/hive.go/app/shutdown"
-	"github.com/iotaledger/hive.go/log"
+	hivedb "github.com/iotaledger/hive.go/kvstore/database"
 	"github.com/iotaledger/hive.go/web/websockethub"
-	"github.com/iotaledger/inx-app/pkg/httpserver"
-	"github.com/iotaledger/wasp/packages/authentication"
 	"github.com/iotaledger/wasp/packages/chain"
+	"github.com/iotaledger/wasp/packages/chain/chaintypes"
 	"github.com/iotaledger/wasp/packages/chains"
 	"github.com/iotaledger/wasp/packages/daemon"
+	"github.com/iotaledger/wasp/packages/database"
 	"github.com/iotaledger/wasp/packages/dkg"
 	"github.com/iotaledger/wasp/packages/evm/jsonrpc"
-	"github.com/iotaledger/wasp/packages/isc"
 	"github.com/iotaledger/wasp/packages/metrics"
 	"github.com/iotaledger/wasp/packages/peering"
 	"github.com/iotaledger/wasp/packages/publisher"
 	"github.com/iotaledger/wasp/packages/registry"
 	"github.com/iotaledger/wasp/packages/users"
 	"github.com/iotaledger/wasp/packages/webapi"
-	"github.com/iotaledger/wasp/packages/webapi/apierrors"
-	"github.com/iotaledger/wasp/packages/webapi/controllers/controllerutils"
 	"github.com/iotaledger/wasp/packages/webapi/websocket"
 )
 
@@ -54,12 +47,6 @@ func init() {
 var (
 	Component *app.Component
 	deps      dependencies
-)
-
-const (
-	broadcastQueueSize            = 20000
-	clientSendChannelSize         = 1000
-	maxWebsocketMessageSize int64 = 510
 )
 
 type dependencies struct {
@@ -86,129 +73,6 @@ func initConfigParams(c *dig.Container) error {
 	}
 
 	return nil
-}
-
-//nolint:funlen
-func NewEcho(params *ParametersWebAPI, metrics *metrics.ChainMetricsProvider, log log.Logger) *echo.Echo {
-	e := httpserver.NewEcho(
-		log,
-		nil,
-		ParamsWebAPI.DebugRequestLoggerEnabled,
-	)
-
-	e.Server.ReadTimeout = params.Limits.ReadTimeout
-	e.Server.WriteTimeout = params.Limits.WriteTimeout
-
-	e.HidePort = true
-	e.HTTPErrorHandler = apierrors.HTTPErrorHandler()
-
-	webapi.ConfirmedStateLagThreshold = params.Limits.ConfirmedStateLagThreshold
-	authentication.DefaultJWTDuration = params.Auth.JWTConfig.Duration
-
-	e.Pre(middleware.RemoveTrailingSlash())
-
-	// publish metrics to prometheus component (that exposes a separate http server on another port)
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			if strings.HasPrefix(c.Path(), "/chains/") {
-				// ignore metrics for all requests not related to "chains/<chainID>""
-				return next(c)
-			}
-			start := time.Now()
-			err := next(c)
-
-			status := c.Response().Status
-			if err != nil {
-				var httpError *echo.HTTPError
-				if errors.As(err, &httpError) {
-					status = httpError.Code
-				}
-				if status == 0 || status == http.StatusOK {
-					status = http.StatusInternalServerError
-				}
-			}
-
-			chainID, ok := c.Get(controllerutils.EchoContextKeyChainID).(isc.ChainID)
-			if !ok {
-				return err
-			}
-
-			operation, ok := c.Get(controllerutils.EchoContextKeyOperation).(string)
-			if !ok {
-				return err
-			}
-			metrics.GetChainMetrics(chainID).WebAPI.WebAPIRequest(operation, status, time.Since(start))
-			return err
-		}
-	})
-
-	// timeout middleware
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			timeoutCtx, cancel := context.WithTimeout(c.Request().Context(), params.Limits.Timeout)
-			defer cancel()
-
-			c.SetRequest(c.Request().WithContext(timeoutCtx))
-
-			return next(c)
-		}
-	})
-
-	// Middleware to unescape any supplied path (/path/foo%40bar/) parameter
-	// Query parameters (?name=foo%40bar) get unescaped by default.
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			escapedPathParams := c.ParamValues()
-			unescapedPathParams := make([]string, len(escapedPathParams))
-
-			for i, param := range escapedPathParams {
-				unescapedParam, err := url.PathUnescape(param)
-
-				if err != nil {
-					unescapedPathParams[i] = param
-				} else {
-					unescapedPathParams[i] = unescapedParam
-				}
-			}
-
-			c.SetParamValues(unescapedPathParams...)
-
-			return next(c)
-		}
-	})
-
-	e.Use(middleware.BodyLimit(params.Limits.MaxBodyLength))
-
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Format: `${time_rfc3339_nano} ${remote_ip} ${method} ${uri} ${status} error="${error}"` + "\n",
-	}))
-
-	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins:     []string{"*"},
-		AllowHeaders:     []string{"*"},
-		AllowMethods:     []string{"*"},
-		AllowCredentials: true,
-	}))
-
-	return e
-}
-
-func CreateEchoSwagger(e *echo.Echo, version string) echoswagger.ApiRoot {
-	echoSwagger := echoswagger.New(e, "/doc", &echoswagger.Info{
-		Title:       "Wasp API",
-		Description: "REST API for the Wasp node",
-		Version:     version,
-	})
-
-	echoSwagger.AddSecurityAPIKey("Authorization", "JWT Token", echoswagger.SecurityInHeader).
-		SetExternalDocs("Find out more about Wasp", "https://wiki.iota.org/smart-contracts/overview").
-		SetUI(echoswagger.UISetting{DetachSpec: false, HideTop: false}).
-		SetScheme("http", "https")
-
-	echoSwagger.SetRequestContentType(echo.MIMEApplicationJSON)
-	echoSwagger.SetResponseContentType(echo.MIMEApplicationJSON)
-
-	return echoSwagger
 }
 
 func provide(c *dig.Container) error {
@@ -242,31 +106,26 @@ func provide(c *dig.Container) error {
 	}
 
 	if err := c.Provide(func(deps webapiServerDeps) webapiServerResult {
-		e := NewEcho(ParamsWebAPI, deps.ChainMetricsProvider, Component)
-
-		echoSwagger := CreateEchoSwagger(e, deps.AppInfo.Version)
-		websocketOptions := websocketserver.AcceptOptions{
-			InsecureSkipVerify: true,
-			// Disable compression due to incompatibilities with the latest Safari browsers:
-			// https://github.com/tilt-dev/tilt/issues/4746
-			CompressionMode: websocketserver.CompressionDisabled,
-		}
-
 		logger := Component.NewChildLogger("WebAPI/v2")
 
-		hub := websockethub.NewHub(Component, &websocketOptions, broadcastQueueSize, clientSendChannelSize, maxWebsocketMessageSize)
+		echoSwagger := webapi.NewEcho(
+			ParamsWebAPI.DebugRequestLoggerEnabled,
+			&ParamsWebAPI.Limits,
+			ParamsWebAPI.Auth.JWTConfig.Duration,
+			deps.ChainMetricsProvider,
+			deps.AppInfo.Version,
+			Component,
+		)
 
-		websocketService := websocket.NewWebsocketService(logger, hub, []publisher.ISCEventType{
-			publisher.ISCEventKindNewBlock,
-			publisher.ISCEventKindReceipt,
-			publisher.ISCEventIssuerVM,
-			publisher.ISCEventKindBlockEvents,
-		}, deps.Publisher, deps.NodeConnection.L1APIProvider().LatestAPI(), websocket.WithMaxTopicSubscriptionsPerClient(ParamsWebAPI.Limits.MaxTopicSubscriptionsPerClient))
+		hub, websocketService := webapi.InitWebsocket(
+			Component,
+			deps.Publisher,
+			deps.NodeConnection.L1APIProvider().LatestAPI(),
+			ParamsWebAPI.Limits.MaxTopicSubscriptionsPerClient,
+		)
 
-		if ParamsWebAPI.DebugRequestLoggerEnabled {
-			echoSwagger.Echo().Use(middleware.BodyDump(func(c echo.Context, reqBody, resBody []byte) {
-				logger.LogDebugf("API Dump: Request=%q, Response=%q", reqBody, resBody)
-			}))
+		evmIndexDBProvider := func() (*database.Database, error) {
+			return database.DatabaseWithDefaultSettings(ParamsWebAPI.IndexDbPath, true, hivedb.EngineRocksDB, false)
 		}
 
 		webapi.Init(
@@ -280,7 +139,7 @@ func provide(c *dig.Container) error {
 			deps.ChainRecordRegistryProvider,
 			deps.DKShareRegistryProvider,
 			deps.NodeIdentityProvider,
-			func() *chains.Chains {
+			func() chaintypes.Chains {
 				return deps.Chains
 			},
 			func() *dkg.Node {
@@ -291,7 +150,7 @@ func provide(c *dig.Container) error {
 			ParamsWebAPI.Auth,
 			deps.APICacheTTL,
 			websocketService,
-			ParamsWebAPI.IndexDbPath,
+			evmIndexDBProvider,
 			deps.Publisher,
 			jsonrpc.NewParameters(
 				ParamsWebAPI.Limits.Jsonrpc.MaxBlocksInLogsFilterRange,

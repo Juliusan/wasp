@@ -37,10 +37,6 @@ import (
 	"github.com/iotaledger/wasp/packages/webapi/interfaces"
 )
 
-type Provider func() *Chains // TODO: Use DI instead of that.
-
-type ChainProvider func(chainID isc.ChainID) chaintypes.Chain
-
 type Chains struct {
 	ctx                        context.Context
 	log                        log.Logger
@@ -207,7 +203,7 @@ func (c *Chains) initSnapshotsToLoad(configs []string) {
 			}
 			c.defaultSnapshotToLoad = &blockHash
 		} else {
-			chainID, err := isc.ChainIDFromString(configSplit[0])
+			chainID, err := isc.ChainIDFromBech32(configSplit[0], c.nodeConnection.Bech32HRP())
 			if err != nil {
 				c.log.LogWarnf("Parsing snapshots to load: %s in %s is not a chain ID: %v", configSplit[0], config, err)
 				continue
@@ -312,7 +308,7 @@ func (c *Chains) activateWithoutLocking(chainID isc.ChainID) error { //nolint:fu
 	//
 	// Check, maybe it is already running.
 	if c.allChains.Has(chainID) {
-		c.log.LogDebugf("Chain %v = %v is already activated", chainID.ShortString(), chainID.String())
+		c.log.LogDebugf("Chain %v = %v is already activated", chainID.ShortString(), chainID.Bech32(c.nodeConnection.Bech32HRP()))
 		return nil
 	}
 	//
@@ -338,7 +334,7 @@ func (c *Chains) activateWithoutLocking(chainID isc.ChainID) error { //nolint:fu
 	chainLog := c.log.NewChildLogger(chainID.ShortString())
 	var chainWAL sm_gpa_utils.BlockWAL
 	if c.walEnabled {
-		chainWAL, err = sm_gpa_utils.NewBlockWAL(chainLog, c.walFolderPath, chainID, chainMetrics.BlockWAL)
+		chainWAL, err = sm_gpa_utils.NewBlockWAL(chainLog, c.walFolderPath, chainID, chainMetrics.BlockWAL, c.nodeConnection.Bech32HRP())
 		if err != nil {
 			panic(fmt.Errorf("cannot create WAL: %w", err))
 		}
@@ -382,6 +378,7 @@ func (c *Chains) activateWithoutLocking(chainID isc.ChainID) error { //nolint:fu
 		c.snapshotNetworkPaths,
 		chainStore,
 		chainMetrics.Snapshots,
+		c.nodeConnection.Bech32HRP(),
 		chainLog,
 	)
 	if err != nil {
@@ -426,7 +423,7 @@ func (c *Chains) activateWithoutLocking(chainID isc.ChainID) error { //nolint:fu
 		cancelFunc: chainCancel,
 	})
 
-	c.log.LogInfof("activated chain: %v = %s", chainID.ShortString(), chainID.String())
+	c.log.LogInfof("activated chain: %v = %s", chainID.ShortString(), chainID.Bech32(c.nodeConnection.Bech32HRP()))
 	return nil
 }
 
@@ -449,13 +446,13 @@ func (c *Chains) Deactivate(chainID isc.ChainID) error {
 
 	ch, exists := c.allChains.Get(chainID)
 	if !exists {
-		c.log.LogDebugf("chain is not active: %v = %s", chainID.ShortString(), chainID.String())
+		c.log.LogDebugf("chain is not active: %v = %s", chainID.ShortString(), chainID.Bech32(c.nodeConnection.Bech32HRP()))
 		return nil
 	}
 	ch.cancelFunc()
 	c.accessMgr.ChainDismissed(chainID)
 	c.allChains.Delete(chainID)
-	c.log.LogDebugf("chain has been deactivated: %v = %s", chainID.ShortString(), chainID.String())
+	c.log.LogDebugf("chain has been deactivated: %v = %s", chainID.ShortString(), chainID.Bech32(c.nodeConnection.Bech32HRP()))
 	return nil
 }
 

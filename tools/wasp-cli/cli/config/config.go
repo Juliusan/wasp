@@ -2,10 +2,10 @@ package config
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/spf13/viper"
 
+	iotago "github.com/iotaledger/iota.go/v4"
 	"github.com/iotaledger/wasp/packages/isc"
 	"github.com/iotaledger/wasp/tools/wasp-cli/log"
 )
@@ -15,31 +15,24 @@ var (
 	WaitForCompletion bool
 )
 
-const (
-	l1ParamsKey          = "l1.params"
-	l1ParamsTimestampKey = "l1.timestamp"
-	l1ParamsExpiration   = 24 * time.Hour
-)
-
-func L1ParamsExpired() bool {
-	if viper.Get(l1ParamsKey) == nil {
-		return true
-	}
-	return viper.GetTime(l1ParamsTimestampKey).Add(l1ParamsExpiration).Before(time.Now())
-}
-
 func Read() {
 	viper.SetConfigFile(ConfigPath)
 	_ = viper.ReadInConfig()
 }
 
 func L1APIAddress() string {
-	host := viper.GetString("l1.apiAddress")
+	host := viper.GetString("l1.apiaddress")
+	if host == "" {
+		log.Fatalf("l1.apiaddress not defined")
+	}
 	return host
 }
 
 func L1FaucetAddress() string {
-	address := viper.GetString("l1.faucetAddress")
+	address := viper.GetString("l1.faucetaddress")
+	if address == "" {
+		log.Fatalf("l1.faucetaddress not defined")
+	}
 	return address
 }
 
@@ -84,12 +77,12 @@ func AddChain(name, chainID string) {
 	Set("chains."+name, chainID)
 }
 
-func GetChain(name string) isc.ChainID {
+func GetChain(name string, networkPrefix iotago.NetworkPrefix) isc.ChainID {
 	configChainID := viper.GetString("chains." + name)
 	if configChainID == "" {
 		log.Fatal(fmt.Sprintf("chain '%s' doesn't exist in config file", name))
 	}
-	chainID, err := isc.ChainIDFromString(configChainID)
+	chainID, err := isc.ChainIDFromBech32(configChainID, networkPrefix)
 	log.Check(err)
 	return chainID
 }

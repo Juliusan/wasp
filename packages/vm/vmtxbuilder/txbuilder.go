@@ -1,6 +1,7 @@
 package vmtxbuilder
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -204,9 +205,15 @@ func (txb *AnchorTransactionBuilder) InputsAreFull() bool {
 }
 
 // BuildTransactionEssence builds transaction essence from tx builder data
-func (txb *AnchorTransactionBuilder) BuildTransactionEssence(stateMetadata []byte, creationSlot iotago.SlotIndex) (*iotago.Transaction, iotago.Unlocks) {
+func (txb *AnchorTransactionBuilder) BuildTransactionEssence(
+	stateMetadata []byte,
+	creationSlot iotago.SlotIndex,
+	allot iotago.Mana,
+	blockIssuerKey iotago.BlockIssuerKey,
+) (*iotago.Transaction, iotago.Unlocks, error) {
 	inputs, inputIDs, unlocks := txb.buildInputs()
-	return &iotago.Transaction{
+
+	tx := &iotago.Transaction{
 		API: txb.L1API(),
 		TransactionEssence: &iotago.TransactionEssence{
 			CreationSlot: creationSlot,
@@ -216,8 +223,33 @@ func (txb *AnchorTransactionBuilder) BuildTransactionEssence(stateMetadata []byt
 				iotago.WithTransactionCanDestroyFoundryOutputs(true),
 			),
 		},
-		Outputs: txb.buildOutputs(stateMetadata, creationSlot, inputs),
-	}, unlocks
+		Outputs: txb.buildOutputs(
+			stateMetadata,
+			creationSlot,
+			inputs,
+			blockIssuerKey,
+		),
+	}
+
+	accountID := txb.resultAccountOutput.AccountID
+	if allot > 0 && !accountID.Empty() {
+		if txb.resultAccountOutput.Mana < allot {
+			return nil, nil, errors.New("insufficient mana for allotment")
+		}
+		txb.resultAccountOutput.Mana -= allot
+
+		tx.TransactionEssence.ContextInputs = iotago.TxEssenceContextInputs{
+			&iotago.BlockIssuanceCreditInput{
+				AccountID: accountID,
+			},
+		}
+		tx.Allotments = iotago.Allotments{{
+			AccountID: accountID,
+			Mana:      allot,
+		}}
+	}
+
+	return tx, unlocks, nil
 }
 
 // buildInputs generates a deterministic list of inputs for the transaction essence
@@ -300,25 +332,21 @@ func (txb *AnchorTransactionBuilder) AccountID() iotago.AccountID {
 	return util.AccountIDFromAccountOutput(out, id)
 }
 
-func (txb *AnchorTransactionBuilder) getSDInChainOutputs() iotago.BaseToken {
-	ret := lo.Must(txb.L1APIForInputs().StorageScoreStructure().MinDeposit(txb.inputs.AnchorOutput))
-	if _, out, ok := txb.inputs.AccountOutput(); ok {
-		ret += out.Amount
-	}
-	return ret
-}
-
 func (txb *AnchorTransactionBuilder) ChangeInSD(
 	stateMetadata []byte,
 	creationSlot iotago.SlotIndex,
+	blockIssuerKey iotago.BlockIssuerKey,
 ) (iotago.BaseToken, iotago.BaseToken, int64) {
+	oldSD := txb.inputs.StorageDeposit(txb.l1APIProvider)
+
 	mockAnchor, mockAccount := txb.CreateAnchorAndAccountOutputs(
 		stateMetadata,
 		creationSlot,
-		txb.inputs.AnchorOutput.Mana,
+		0, // mana is not relevant here
+		blockIssuerKey,
 	)
-	newSD := lo.Must(txb.L1API().StorageScoreStructure().MinDeposit(mockAnchor)) + mockAccount.Amount
-	oldSD := txb.getSDInChainOutputs()
+	newSD := lo.Must(txb.L1API().StorageScoreStructure().MinDeposit(mockAnchor)) + lo.Must(txb.L1API().StorageScoreStructure().MinDeposit(mockAccount))
+
 	return oldSD, newSD, int64(oldSD) - int64(newSD)
 }
 
@@ -326,13 +354,13 @@ func (txb *AnchorTransactionBuilder) CreateAnchorAndAccountOutputs(
 	stateMetadata []byte,
 	creationSlot iotago.SlotIndex,
 	totalManaInInputs iotago.Mana,
+	blockIssuerKey iotago.BlockIssuerKey,
 ) (*iotago.AnchorOutput, *iotago.AccountOutput) {
 	anchorID := txb.inputs.AnchorOutput.AnchorID
 	if anchorID.Empty() {
 		anchorID = iotago.AnchorIDFromOutputID(txb.inputs.AnchorOutputID)
 	}
 	anchorOutput := &iotago.AnchorOutput{
-		Amount:     0,
 		AnchorID:   anchorID,
 		StateIndex: txb.inputs.AnchorOutput.StateIndex + 1,
 		UnlockConditions: iotago.AnchorOutputUnlockConditions{
@@ -342,13 +370,12 @@ func (txb *AnchorTransactionBuilder) CreateAnchorAndAccountOutputs(
 		Features: iotago.AnchorOutputFeatures{
 			&iotago.StateMetadataFeature{Entries: iotago.StateMetadataFeatureEntries{"": stateMetadata}},
 		},
-		Mana: totalManaInInputs,
 	}
 	if metadata := txb.inputs.AnchorOutput.FeatureSet().Metadata(); metadata != nil {
 		anchorOutput.Features.Upsert(&iotago.MetadataFeature{Entries: metadata.Entries})
 		anchorOutput.Features.Sort()
 	}
-	anchorOutput.Amount = txb.accountsView.TotalFungibleTokens().BaseTokens + lo.Must(txb.L1API().StorageScoreStructure().MinDeposit(anchorOutput))
+	anchorOutput.Amount = lo.Must(txb.L1API().StorageScoreStructure().MinDeposit(anchorOutput))
 
 	accountOutput := &iotago.AccountOutput{
 		FoundryCounter: txb.nextFoundryCounter(),
@@ -358,14 +385,22 @@ func (txb *AnchorTransactionBuilder) CreateAnchorAndAccountOutputs(
 		Features: iotago.AccountOutputFeatures{
 			&iotago.SenderFeature{Address: anchorID.ToAddress()},
 		},
+		Mana: totalManaInInputs,
 	}
 	if id, out, ok := txb.inputs.AccountOutput(); ok {
-		accountOutput.AccountID = out.AccountID
-		if accountOutput.AccountID.Empty() {
+		if out.AccountID.Empty() {
 			accountOutput.AccountID = iotago.AccountIDFromOutputID(id)
+		} else {
+			accountOutput.AccountID = out.AccountID
+		}
+		if blockIssuerKey != nil {
+			accountOutput.Features.Upsert(&iotago.BlockIssuerFeature{
+				ExpirySlot:      iotago.MaxSlotIndex,
+				BlockIssuerKeys: iotago.BlockIssuerKeys{blockIssuerKey},
+			})
 		}
 	}
-	accountOutput.Amount = lo.Must(txb.L1API().StorageScoreStructure().MinDeposit(accountOutput))
+	accountOutput.Amount = txb.accountsView.TotalFungibleTokens().BaseTokens + lo.Must(txb.L1API().StorageScoreStructure().MinDeposit(accountOutput))
 
 	return anchorOutput, accountOutput
 }
@@ -382,6 +417,7 @@ func (txb *AnchorTransactionBuilder) buildOutputs(
 	stateMetadata []byte,
 	creationSlot iotago.SlotIndex,
 	inputs iotago.OutputSet,
+	blockIssuerKey iotago.BlockIssuerKey,
 ) iotago.TxEssenceOutputs {
 	ret := make(iotago.TxEssenceOutputs, 0, 1+len(txb.balanceNativeTokens)+len(txb.postedOutputs))
 
@@ -394,7 +430,12 @@ func (txb *AnchorTransactionBuilder) buildOutputs(
 		vm.RewardsInputSet{},
 	))
 
-	txb.resultAnchorOutput, txb.resultAccountOutput = txb.CreateAnchorAndAccountOutputs(stateMetadata, creationSlot, totalMana)
+	txb.resultAnchorOutput, txb.resultAccountOutput = txb.CreateAnchorAndAccountOutputs(
+		stateMetadata,
+		creationSlot,
+		totalMana,
+		blockIssuerKey,
+	)
 	ret = append(ret, txb.resultAnchorOutput, txb.resultAccountOutput)
 
 	// creating outputs for updated internal accounts

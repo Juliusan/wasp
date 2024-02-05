@@ -70,13 +70,13 @@ func (ch *Chain) String() string {
 func (ch *Chain) DumpAccounts() string {
 	_, chainOwnerID, _ := ch.GetInfo()
 	ret := fmt.Sprintf("ChainID: %s\nChain owner: %s\n",
-		ch.ChainID.String(),
-		chainOwnerID.String(),
+		ch.ChainID.Bech32(ch.Env.L1APIProvider().CommittedAPI().ProtocolParameters().Bech32HRP()),
+		chainOwnerID.Bech32(ch.Env.L1APIProvider().CommittedAPI().ProtocolParameters().Bech32HRP()),
 	)
 	acc := ch.L2Accounts()
 	for i := range acc {
 		aid := acc[i]
-		ret += fmt.Sprintf("  %s:\n", aid.String())
+		ret += fmt.Sprintf("  %s:\n", aid.Bech32(ch.Env.L1APIProvider().CommittedAPI().ProtocolParameters().Bech32HRP()))
 		bals := ch.L2Assets(aid)
 		ret += fmt.Sprintf("%s\n", bals.String())
 	}
@@ -147,7 +147,7 @@ func (ch *Chain) UploadBlob(user *cryptolib.KeyPair, fields dict.Dict) (ret hash
 		return expectedHash, nil
 	}
 	req := NewCallParams(blob.FuncStoreBlob.Message(fields))
-	_, estimate, err := ch.EstimateGasOffLedger(req, nil, true)
+	_, estimate, err := ch.EstimateGasOffLedger(req, nil)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -247,20 +247,26 @@ func (ch *Chain) DeployWasmContract(keyPair *cryptolib.KeyPair, name, fname stri
 	return ch.DeployContract(keyPair, name, hprog, initParams...)
 }
 
+func EVMCallDataFromArtifacts(t require.TestingT, abiJSON string, bytecode []byte, args ...interface{}) (abi.ABI, []byte) {
+	contractABI, err := abi.JSON(strings.NewReader(abiJSON))
+	require.NoError(t, err)
+
+	constructorArguments, err := contractABI.Pack("", args...)
+	require.NoError(t, err)
+
+	data := []byte{}
+	data = append(data, bytecode...)
+	data = append(data, constructorArguments...)
+	return contractABI, data
+}
+
 // DeployEVMContract deploys an evm contract on the chain
 func (ch *Chain) DeployEVMContract(creator *ecdsa.PrivateKey, abiJSON string, bytecode []byte, value *big.Int, args ...interface{}) (common.Address, abi.ABI) {
 	creatorAddress := crypto.PubkeyToAddress(creator.PublicKey)
 
 	nonce := ch.Nonce(isc.NewEthereumAddressAgentID(ch.ChainID, creatorAddress))
 
-	contractABI, err := abi.JSON(strings.NewReader(abiJSON))
-	require.NoError(ch.Env.T, err)
-	constructorArguments, err := contractABI.Pack("", args...)
-	require.NoError(ch.Env.T, err)
-
-	data := []byte{}
-	data = append(data, bytecode...)
-	data = append(data, constructorArguments...)
+	contractABI, data := EVMCallDataFromArtifacts(ch.Env.T, abiJSON, bytecode, args...)
 
 	gasLimit, err := ch.EVM().EstimateGas(ethereum.CallMsg{
 		From:  creatorAddress,
@@ -611,13 +617,21 @@ func (ch *Chain) Nonce(agentID isc.AgentID) uint64 {
 }
 
 // ReceiveOffLedgerRequest implements chain.Chain
-func (*Chain) ReceiveOffLedgerRequest(request isc.OffLedgerRequest, sender *cryptolib.PublicKey) error {
-	panic("unimplemented")
+func (ch *Chain) ReceiveOffLedgerRequest(request isc.OffLedgerRequest, sender *cryptolib.PublicKey) error {
+	_, err := ch.RunOffLedgerRequest(request)
+	return err
 }
 
 // AwaitRequestProcessed implements chain.Chain
-func (*Chain) AwaitRequestProcessed(ctx context.Context, requestID isc.RequestID, confirmed bool) <-chan *blocklog.RequestReceipt {
-	panic("unimplemented")
+func (ch *Chain) AwaitRequestProcessed(ctx context.Context, requestID isc.RequestID, confirmed bool) <-chan *blocklog.RequestReceipt {
+	receiptCh := make(chan *blocklog.RequestReceipt, 1)
+	ch.WaitUntil(func() bool {
+		return ch.IsRequestProcessed(requestID)
+	})
+	rec, ok := ch.GetRequestReceipt(requestID)
+	require.True(ch.Env.T, ok)
+	receiptCh <- rec
+	return receiptCh
 }
 
 func (ch *Chain) LatestBlockIndex() uint32 {

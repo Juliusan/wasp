@@ -6,13 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/samber/lo"
 
 	"github.com/iotaledger/hive.go/log"
 	"github.com/iotaledger/hive.go/runtime/ioutils"
+	iotago "github.com/iotaledger/iota.go/v4"
 	"github.com/iotaledger/wasp/packages/isc"
 	"github.com/iotaledger/wasp/packages/metrics"
 	"github.com/iotaledger/wasp/packages/state"
@@ -31,8 +32,8 @@ const (
 	constBlockWALTmpFileSuffix = ".tmp"
 )
 
-func NewBlockWAL(log log.Logger, baseDir string, chainID isc.ChainID, metrics *metrics.ChainBlockWALMetrics) (BlockWAL, error) {
-	dir := filepath.Join(baseDir, chainID.String())
+func NewBlockWAL(log log.Logger, baseDir string, chainID isc.ChainID, metrics *metrics.ChainBlockWALMetrics, netPrefix iotago.NetworkPrefix) (BlockWAL, error) {
+	dir := filepath.Join(baseDir, chainID.Bech32(netPrefix))
 	if err := ioutils.CreateDirectory(dir, 0o777); err != nil {
 		return nil, fmt.Errorf("BlockWAL cannot create folder %v: %w", dir, err)
 	}
@@ -141,17 +142,18 @@ func (bwT *blockWAL) Read(blockHash state.BlockHash) (state.Block, error) {
 // This reads all the existing blocks from the WAL dir and passes them to the supplied callback.
 // The blocks are provided ordered by the state index, so that they can be applied to the store.
 // This function reads blocks twice, but tries to minimize the amount of memory required to load the WAL.
-func (bwT *blockWAL) ReadAllByStateIndex(cb func(stateIndex uint32, block state.Block) bool) error {
+func (bwT *blockWAL) ReadAllByStateIndex(cb func(stateIndex uint32, block state.Block) bool) error { //nolint:funlen
+	bwT.LogDebugf("Reading entire WAL...")
 	blocksByStateIndex := map[uint32][]string{}
-	checkFile := func(filePath string) {
+	checkFile := func(filePath string) bool {
 		if !strings.HasSuffix(filePath, constBlockWALFileSuffix) {
-			return
+			return false
 		}
 		stateIndex, err := BlockIndexFromFilePath(filePath)
 		if err != nil {
 			bwT.metrics.IncFailedReads()
-			bwT.LogWarn("Unable to read %v: %v", filePath, err)
-			return
+			bwT.LogWarn("Reading entire WAL: unable to read block index from %v: %v", filePath, err)
+			return false
 		}
 		stateIndexPaths, found := blocksByStateIndex[stateIndex]
 		if found {
@@ -160,10 +162,15 @@ func (bwT *blockWAL) ReadAllByStateIndex(cb func(stateIndex uint32, block state.
 			stateIndexPaths = []string{filePath}
 		}
 		blocksByStateIndex[stateIndex] = stateIndexPaths
+		return true
 	}
 
+	blocksTotal := 0
 	var checkDir func(dirPath string, dirEntries []os.DirEntry)
 	checkDir = func(dirPath string, dirEntries []os.DirEntry) {
+		bwT.LogDebugf("Reading entire WAL: checking folder %v with %v entries...", dirPath, len(dirEntries))
+		entries := 0
+		blocks := 0
 		for _, dirEntry := range dirEntries {
 			entryPath := filepath.Join(dirPath, dirEntry.Name())
 			if dirEntry.IsDir() {
@@ -172,9 +179,20 @@ func (bwT *blockWAL) ReadAllByStateIndex(cb func(stateIndex uint32, block state.
 					checkDir(entryPath, subDirEntries)
 				}
 			} else {
-				checkFile(entryPath)
+				isBlock := checkFile(entryPath)
+				if isBlock {
+					blocks++
+					blocksTotal++
+				}
+			}
+			entries++
+			if entries%1000 == 0 {
+				bwT.LogDebugf("Reading entire WAL: checking folder %v: %v entries checked, %v blocks found (%v in total)...",
+					dirPath, entries, blocks, blocksTotal)
 			}
 		}
+		bwT.LogDebugf("Reading entire WAL: checking folder %v completed: %v entries checked, %v blocks found (%v in total)",
+			dirPath, entries, blocks, blocksTotal)
 	}
 
 	dirEntries, err := os.ReadDir(bwT.dir)
@@ -183,15 +201,17 @@ func (bwT *blockWAL) ReadAllByStateIndex(cb func(stateIndex uint32, block state.
 	}
 	checkDir(bwT.dir, dirEntries)
 
+	bwT.LogDebugf("Reading entire WAL: %v blocks found, sorting them by index...", blocksTotal)
 	allStateIndexes := lo.Keys(blocksByStateIndex)
-	sort.Slice(allStateIndexes, func(i, j int) bool { return allStateIndexes[i] < allStateIndexes[j] })
+	slices.Sort(allStateIndexes)
+	bwT.LogDebugf("Reading entire WAL: blocks sorted, notifying caller...")
 	for _, stateIndex := range allStateIndexes {
 		stateIndexPaths := blocksByStateIndex[stateIndex]
 		for _, stateIndexPath := range stateIndexPaths {
 			fileBlock, fileErr := BlockFromFilePath(stateIndexPath)
 			if fileErr != nil {
 				bwT.metrics.IncFailedReads()
-				bwT.LogWarn("Unable to read %v: %v", stateIndexPath, err)
+				bwT.LogWarn("Reading entire WAL: unable to read block from %v: %v", stateIndexPath, err)
 				continue
 			}
 			if !cb(stateIndex, fileBlock) {
@@ -199,6 +219,7 @@ func (bwT *blockWAL) ReadAllByStateIndex(cb func(stateIndex uint32, block state.
 			}
 		}
 	}
+	bwT.LogDebugf("Reading entire WAL completed")
 	return nil
 }
 

@@ -6,6 +6,7 @@ package solo
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math/big"
 	"math/rand"
 	"sync"
@@ -128,6 +129,9 @@ type Chain struct {
 	metrics *metrics.ChainMetrics
 
 	migrationScheme *migrations.MigrationScheme
+
+	FakeChainNodes    func() []peering.PeerStatusProvider
+	FakeCommitteeInfo func() *chaintypes.CommitteeInfo
 }
 
 type InitOptions struct {
@@ -184,7 +188,8 @@ func New(t Context, initOptions ...*InitOptions) *Solo {
 	}
 
 	_ = ret.publisher.Events.Published.Hook(func(ev *publisher.ISCEvent[any]) {
-		ret.logger.LogInfof("solo publisher: %s %s %v", ev.Kind, ev.ChainID, ev.String())
+		hrp := testutil.L1API.ProtocolParameters().Bech32HRP()
+		ret.logger.LogInfof("solo publisher: %s", ev.String(hrp))
 	})
 
 	go ret.publisher.Run(ctx)
@@ -192,6 +197,10 @@ func New(t Context, initOptions ...*InitOptions) *Solo {
 	go ret.batchLoop()
 
 	return ret
+}
+
+func (env *Solo) Log() log.Logger {
+	return env.logger
 }
 
 func (env *Solo) batchLoop() {
@@ -237,6 +246,12 @@ func (env *Solo) GetDBHash() (ret hashing.HashValue) {
 
 func (env *Solo) Publisher() *publisher.Publisher {
 	return env.publisher
+}
+
+func (env *Solo) GetChains() map[isc.ChainID]*Chain {
+	env.chainsMutex.Lock()
+	defer env.chainsMutex.Unlock()
+	return maps.Clone(env.chains)
 }
 
 func (env *Solo) GetChainByName(name string) *Chain {
@@ -312,7 +327,7 @@ func (env *Solo) deployChain(
 		initParams,
 		outs,
 		env.SlotIndex(),
-		0,
+		0, // TODO could be the latest instead ? :thinking:
 		testutil.L1APIProvider,
 		testutil.TokenInfo,
 	)
@@ -326,9 +341,9 @@ func (env *Solo) deployChain(
 	env.AssertL1BaseTokens(originatorAddr, initialL1Balance-anchor.Deposit)
 
 	env.logger.LogInfof("deploying new chain '%s'. ID: %s, state controller address: %s",
-		name, chainID.String(), stateControllerAddr.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
-	env.logger.LogInfof("     chain '%s'. state controller address: %s", chainID.String(), stateControllerAddr.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
-	env.logger.LogInfof("     chain '%s'. originator address: %s", chainID.String(), originatorAddr.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
+		name, chainID.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()), stateControllerAddr.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
+	env.logger.LogInfof("     chain '%s'. state controller address: %s", chainID.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()), stateControllerAddr.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
+	env.logger.LogInfof("     chain '%s'. originator address: %s", chainID.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()), originatorAddr.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
 
 	chainDB := env.getDB(dbKindChainState, chainID)
 	require.NoError(env.T, err)
@@ -339,7 +354,7 @@ func (env *Solo) deployChain(
 	{
 		block, err2 := store.LatestBlock()
 		require.NoError(env.T, err2)
-		env.logger.LogInfof("     chain '%s'. origin trie root: %s", chainID, block.TrieRoot())
+		env.logger.LogInfof("     chain '%s'. origin trie root: %s", chainID.ShortString(), block.TrieRoot())
 	}
 
 	return chainData{
@@ -389,7 +404,7 @@ func (env *Solo) NewChainExt(
 	defer env.chainsMutex.Unlock()
 	ch := env.addChain(chData)
 
-	ch.log.LogInfof("chain '%s' deployed. Chain ID: %s", ch.Name, ch.ChainID.String())
+	ch.log.LogInfof("chain '%s' deployed. Chain ID: %s", ch.Name, ch.ChainID.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
 	return ch, originTx
 }
 
@@ -429,7 +444,7 @@ func (env *Solo) RequestsForChain(tx *iotago.Transaction, chainID isc.ChainID) (
 	m := env.requestsByChain(tx)
 	ret, ok := m[chainID]
 	if !ok {
-		return nil, fmt.Errorf("chain %s does not exist", chainID.String())
+		return nil, fmt.Errorf("chain %s does not exist", chainID.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
 	}
 	return ret, nil
 }
@@ -456,7 +471,7 @@ func (env *Solo) EnqueueRequests(tx *iotago.SignedTransaction) {
 	for chainID, reqs := range requests {
 		ch, ok := env.chains[chainID]
 		if !ok {
-			env.logger.LogInfof("dispatching requests. Unknown chain: %s", chainID.String())
+			env.logger.LogInfof("dispatching requests. Unknown chain: %s", chainID.Bech32(testutil.L1API.ProtocolParameters().Bech32HRP()))
 			continue
 		}
 		if len(reqs) > 0 {
@@ -529,15 +544,15 @@ func (ch *Chain) AddMigration(m migrations.Migration) {
 }
 
 func (ch *Chain) GetCandidateNodes() []*governance.AccessNodeInfo {
-	panic("unimplemented")
+	return nil
 }
 
 func (ch *Chain) GetChainNodes() []peering.PeerStatusProvider {
-	panic("unimplemented")
+	return ch.FakeChainNodes()
 }
 
 func (ch *Chain) GetCommitteeInfo() *chaintypes.CommitteeInfo {
-	panic("unimplemented")
+	return ch.FakeCommitteeInfo()
 }
 
 func (ch *Chain) ID() isc.ChainID {

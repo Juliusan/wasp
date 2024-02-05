@@ -8,6 +8,7 @@ import (
 	"github.com/iotaledger/wasp/packages/kv"
 	"github.com/iotaledger/wasp/packages/state"
 	"github.com/iotaledger/wasp/packages/transaction"
+	"github.com/iotaledger/wasp/packages/vm"
 	"github.com/iotaledger/wasp/packages/vm/core/accounts"
 	"github.com/iotaledger/wasp/packages/vm/core/governance"
 	"github.com/iotaledger/wasp/packages/vm/core/root"
@@ -20,9 +21,7 @@ func (vmctx *vmContext) stateMetadata(stateCommitment *state.L1Commitment) []byt
 		L1Commitment: stateCommitment,
 	}
 
-	withContractState(vmctx.stateDraft, root.Contract, func(s kv.KVStore) {
-		stateMetadata.SchemaVersion = root.GetSchemaVersion(s)
-	})
+	stateMetadata.SchemaVersion = root.NewStateAccess(vmctx.stateDraft).SchemaVersion()
 
 	withContractState(vmctx.stateDraft, governance.Contract, func(s kv.KVStore) {
 		// On error, the publicURL is len(0)
@@ -39,7 +38,15 @@ func (vmctx *vmContext) CreationSlot() iotago.SlotIndex {
 
 func (vmctx *vmContext) BuildTransactionEssence(stateCommitment *state.L1Commitment, assertTxbuilderBalanced bool) (*iotago.Transaction, iotago.Unlocks) {
 	stateMetadata := vmctx.stateMetadata(stateCommitment)
-	essence, unlocks := vmctx.txbuilder.BuildTransactionEssence(stateMetadata, vmctx.CreationSlot())
+	essence, unlocks, err := vmctx.txbuilder.BuildTransactionEssence(
+		stateMetadata,
+		vmctx.CreationSlot(),
+		vmctx.task.AllotMana,
+		vmctx.task.BlockIssuerKey,
+	)
+	if err != nil {
+		panic(vm.ErrInsufficientManaForAllotment)
+	}
 	if assertTxbuilderBalanced {
 		vmctx.txbuilder.MustBalanced()
 	}
@@ -76,9 +83,9 @@ func (vmctx *vmContext) loadNFT(nftID iotago.NFTID) (out *iotago.NFTOutput, id i
 }
 
 func (vmctx *vmContext) loadTotalFungibleTokens() *isc.FungibleTokens {
-	var totalAssets *isc.FungibleTokens
-	withContractState(vmctx.stateDraft, accounts.Contract, func(s kv.KVStore) {
-		totalAssets = accounts.GetTotalL2FungibleTokens(s, vmctx.task.TokenInfo)
+	var ret *isc.FungibleTokens
+	withContractState(vmctx.stateDraft, accounts.Contract, func(state kv.KVStore) {
+		ret = accounts.GetTotalL2FungibleTokens(vmctx.schemaVersion, state, vmctx.task.TokenInfo)
 	})
-	return totalAssets
+	return ret
 }
