@@ -512,15 +512,10 @@ func (txb *AnchorTransactionBuilder) outputsAreFull() bool {
 func retryOutputFromOnLedgerRequest(req isc.OnLedgerRequest, chainAnchorID iotago.AnchorID) iotago.Output {
 	out := req.Output().Clone()
 
-	features := []iotago.Feature{
-		&iotago.SenderFeature{
-			Address: chainAnchorID.ToAddress(), // must have the chain as the sender, so its recognized as an internalUTXO
-		},
+	senderFeature := &iotago.SenderFeature{
+		Address: chainAnchorID.ToAddress(), // must have the chain as the sender, so its recognized as an internalUTXO
 	}
 	ntFeature := out.FeatureSet().NativeToken()
-	if ntFeature != nil {
-		features = append(features, ntFeature.Clone()) // keep NT feature, if it exists
-	}
 
 	unlock := &iotago.AddressUnlockCondition{
 		Address: chainAnchorID.ToAddress(),
@@ -529,12 +524,24 @@ func retryOutputFromOnLedgerRequest(req isc.OnLedgerRequest, chainAnchorID iotag
 	// cleanup features and unlock conditions
 	switch o := out.(type) {
 	case *iotago.BasicOutput:
+		features := iotago.Features[iotago.BasicOutputFeature]{senderFeature}
+		if ntFeature != nil {
+			features = append(features, ntFeature.Clone()) // keep NT feature, if it exists
+		}
 		o.Features = features
 		o.UnlockConditions = iotago.BasicOutputUnlockConditions{unlock}
 	case *iotago.NFTOutput:
+		features := iotago.Features[iotago.NFTOutputFeature]{senderFeature}
+		if ntFeature != nil {
+			features = append(features, ntFeature.Clone()) // keep NT feature, if it exists
+		}
 		o.Features = features
 		o.UnlockConditions = iotago.NFTOutputUnlockConditions{unlock}
 	case *iotago.AnchorOutput:
+		features := iotago.Features[iotago.AnchorOutputFeature]{senderFeature}
+		if ntFeature != nil {
+			features = append(features, ntFeature.Clone()) // keep NT feature, if it exists
+		}
 		o.Features = features
 		o.UnlockConditions = iotago.AnchorOutputUnlockConditions{unlock}
 	default:
