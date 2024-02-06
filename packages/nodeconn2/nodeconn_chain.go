@@ -124,16 +124,17 @@ func (cnc *chainNodeConn) initialise() error {
 	cnc.sendOutputs(anchorOutputWithID, accountOutputWithID, otherOutputs)
 
 	go func() {
-		cnc.log.LogDebugf("ListenToConfirmedBlocks thread: subscribing to blocks...")
+		log := cnc.log.NewChildLogger("confirmedBlocksListener")
+		log.LogDebug("Subscribing...")
 		err := cnc.nodeBridge.ListenToConfirmedBlocks(cnc.ctx, func(blockMetadata *api.BlockMetadataResponse) error {
 			cnc.confirmedIotaBlockPipe.In() <- blockMetadata
 			return nil
 		})
 		if err != nil && !errors.Is(err, io.EOF) {
-			cnc.log.LogErrorf("ListenToConfirmedBlocks thread: subscribing failed: %v", err)
+			log.LogErrorf("Subscribing failed: %v", err)
 			//nc.shutdownHandler.SelfShutdown("Subscribing to LedgerUpdates failed", true)
 		}
-		cnc.log.LogDebugf("ListenToConfirmedBlocks thread: completed")
+		log.LogDebug("Completed")
 		/*if nc.ctx.Err() == nil {
 			// shutdown in case there isn't a shutdown already in progress
 			nc.shutdownHandler.SelfShutdown("INX connection closed", true)

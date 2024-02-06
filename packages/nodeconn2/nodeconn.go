@@ -68,14 +68,15 @@ func (nc *nodeConn) initialise() error {
 	// otherwise the NodeStatus would never be updated and "syncAndSetProtocolParameters" would be stuck
 	// in an infinite loop
 	go func() {
-		nc.log.LogDebugf("NodeBridge thread: started")
+		log := nc.log.NewChildLogger("nodeBridge")
+		log.LogDebug("Starting...")
 		nc.nodeBridge.Run(nc.ctx)
-		nc.log.LogDebugf("NodeBridge thread: node bridge stopped")
+		log.LogDebug("Completed")
 
 		// if the Run function returns before the context was actually canceled,
 		// it means that the connection to L1 node must have failed.
 		if !errors.Is(nc.ctx.Err(), context.Canceled) {
-			nc.log.LogErrorf("NodeBridge thread: INX connection to node dropped: %v", nc.ctx.Err())
+			log.LogErrorf("INX connection to node dropped: %v", nc.ctx.Err())
 			nc.shutdownHandler.SelfShutdown("INX connection to node dropped", true)
 		}
 	}()
@@ -104,6 +105,7 @@ func (nc *nodeConn) initialise() error {
 			// check for at least one connected peer
 			for i := 0; i < len(peers) && !connected; i++ {
 				if peers[i].Connected {
+					nc.log.LogDebug("Initialising: L1 is connected to peer ", peers[i])
 					connected = true
 				}
 			}
@@ -131,16 +133,17 @@ func (nc *nodeConn) initialise() error {
 	commitment := nc.nodeBridge.LatestFinalizedCommitment()
 	currentSlot := commitment.Commitment.Slot
 	go func() {
-		nc.log.LogDebugf("ListenToLedgerUpdates thread: subscribing to commitments since %v...", currentSlot)
+		log := nc.log.NewChildLogger("ledgerUpdateListener")
+		log.LogDebugf("Subscribing to commitments since %v...", currentSlot)
 		err := nc.nodeBridge.ListenToLedgerUpdates(nc.ctx, currentSlot, iotago.MaxSlotIndex, func(update *nodebridge.LedgerUpdate) error {
 			nc.ledgerUpdatePipe.In() <- update
 			return nil
 		})
 		if err != nil && !errors.Is(err, io.EOF) {
-			nc.log.LogErrorf("ListenToLedgerUpdates thread: subscribing failed: %v", err)
+			log.LogErrorf("Subscribing failed: %v", err)
 			nc.shutdownHandler.SelfShutdown("Subscribing to LedgerUpdates failed", true)
 		}
-		nc.log.LogDebugf("ListenToLedgerUpdates thread: completed")
+		log.LogDebug("Completed")
 		/*if nc.ctx.Err() == nil {
 			// shutdown in case there isn't a shutdown already in progress
 			nc.shutdownHandler.SelfShutdown("INX connection closed", true)
