@@ -112,7 +112,7 @@ func (s *L1Starter) StartPrivtangleIfNecessary(log LogFunc) {
 }
 
 func (s *L1Starter) WaitReady(log LogFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	select {
 	case <-time.After(2 * time.Minute):

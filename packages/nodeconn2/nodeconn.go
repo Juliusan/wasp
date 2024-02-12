@@ -32,6 +32,10 @@ type nodeConn struct {
 
 var _ NodeConnection = &nodeConn{}
 
+var (
+	nodeConnInitTimeoutConst = 180 * time.Second
+)
+
 func NewNodeConn(
 	ctx context.Context,
 	log log.Logger,
@@ -59,11 +63,14 @@ func NewNodeConn(
 	if err != nil {
 		return nil, err
 	}
-	result.run()
+	go result.run()
 	return result, nil
 }
 
 func (nc *nodeConn) initialise() error {
+	ctx, ctxCancel := context.WithTimeout(nc.ctx, nodeConnInitTimeoutConst)
+	defer ctxCancel()
+
 	// the node bridge needs to be started before waiting for L1 to become synced,
 	// otherwise the NodeStatus would never be updated and "syncAndSetProtocolParameters" would be stuck
 	// in an infinite loop
@@ -84,37 +91,38 @@ func (nc *nodeConn) initialise() error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer timeutil.CleanupTicker(ticker)
 
+	// TODO: is this still applicable?
 	// make sure the node is connected to at least one other peer
 	// otherwise the node status may not reflect the network status
-	for connected := false; !connected; {
-		nc.log.LogDebug("Initialising: waiting for L1 to be connected to other peers...")
-		select {
-		case <-ticker.C:
-			mgmClient, err := nc.nodeBridge.Management(nc.ctx)
-			if err != nil {
-				nc.log.LogErrorf("Initialising: failed to obtain management client: %v", err)
-				return err
-			}
-			peersResp, err := mgmClient.Peers(nc.ctx)
-			if err != nil {
-				nc.log.LogErrorf("Initialising: failed to obtain peers: %v", err)
-				return err
-			}
-			peers := peersResp.Peers
-
-			// check for at least one connected peer
-			for i := 0; i < len(peers) && !connected; i++ {
-				if peers[i].Connected {
-					nc.log.LogDebug("Initialising: L1 is connected to peer ", peers[i])
-					connected = true
-				}
-			}
-		case <-nc.ctx.Done():
-			// context was canceled
-			nc.log.LogErrorf("Initialising: context was cancelled while waiting for L1 to be connected to other peers: %v", nc.ctx.Err())
-			return ErrOperationAborted
-		}
-	}
+	// for connected := false; !connected; {
+	// 	nc.log.LogDebug("Initialising: waiting for L1 to be connected to other peers...")
+	// 	select {
+	// 	case <-ticker.C:
+	// 		mgmClient, err := nc.nodeBridge.Management(ctx)
+	// 		if err != nil {
+	// 			nc.log.LogErrorf("Initialising: failed to obtain management client: %v", err)
+	// 			return err
+	// 		}
+	// 		peersResp, err := mgmClient.Peers(ctx)
+	// 		if err != nil {
+	// 			nc.log.LogErrorf("Initialising: failed to obtain peers: %v", err)
+	// 			return err
+	// 		}
+	// 		peers := peersResp.Peers
+	//
+	// 		// check for at least one connected peer
+	// 		for i := 0; i < len(peers) && !connected; i++ {
+	// 			if peers[i].Connected {
+	// 				nc.log.LogDebug("Initialising: L1 is connected to peer ", peers[i])
+	// 				connected = true
+	// 			}
+	// 		}
+	// 	case <-ctx.Done():
+	// 		// context was canceled
+	// 		nc.log.LogErrorf("Initialising: context was cancelled while waiting for L1 to be connected to other peers: %v", ctx.Err())
+	// 		return ErrOperationAborted
+	// 	}
+	// }
 
 	// Waiting for L1 to be healthy
 	for healthy := false; !healthy; {
@@ -122,9 +130,9 @@ func (nc *nodeConn) initialise() error {
 		select {
 		case <-ticker.C:
 			healthy = nc.nodeBridge.IsNodeHealthy()
-		case <-nc.ctx.Done():
+		case <-ctx.Done():
 			// context was canceled
-			nc.log.LogErrorf("Initialising: context was cancelled while waiting for L1 to become healthy: %v", nc.ctx.Err())
+			nc.log.LogErrorf("Initialising: context was cancelled while waiting for L1 to become healthy: %v", ctx.Err())
 			return ErrOperationAborted
 		}
 	}
@@ -132,10 +140,17 @@ func (nc *nodeConn) initialise() error {
 	// Subscribing to ledger updates
 	commitment := nc.nodeBridge.LatestFinalizedCommitment()
 	currentSlot := commitment.Commitment.Slot
+	genesisSlot := nc.nodeBridge.APIProvider().CommittedAPI().ProtocolParameters().GenesisSlot()
+	var subscribeSlot iotago.SlotIndex
+	if currentSlot == genesisSlot {
+		subscribeSlot = genesisSlot + 1
+	} else {
+		subscribeSlot = currentSlot
+	}
 	go func() {
 		log := nc.log.NewChildLogger("ledgerUpdateListener")
-		log.LogDebugf("Subscribing to commitments since %v...", currentSlot)
-		err := nc.nodeBridge.ListenToLedgerUpdates(nc.ctx, currentSlot, iotago.MaxSlotIndex, func(update *nodebridge.LedgerUpdate) error {
+		log.LogDebugf("Subscribing to commitments since %v...", subscribeSlot)
+		err := nc.nodeBridge.ListenToLedgerUpdates(nc.ctx, subscribeSlot, iotago.MaxSlotIndex, func(update *nodebridge.LedgerUpdate) error {
 			nc.ledgerUpdatePipe.In() <- update
 			return nil
 		})
