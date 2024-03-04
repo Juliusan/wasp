@@ -28,6 +28,10 @@ func (s *StateWriter) SetRotationAddress(addr iotago.Address) {
 	s.state.Set(varRotateToAddress, isc.AddressToBytes(addr))
 }
 
+func (s *StateWriter) SetBlockIssuer(accID iotago.AccountID) {
+	s.state.Set(varStateControllerBlockIssuer, lo.Must(accID.Bytes()))
+}
+
 // GetRotationAddress tries to read the state of 'governance' and extract rotation address
 // If succeeds, it means this block is fake.
 // If fails, return nil
@@ -37,6 +41,10 @@ func (s *StateReader) GetRotationAddress() iotago.Address {
 		return nil
 	}
 	return ret
+}
+
+func (s *StateReader) GetBlockIssuer() iotago.AccountID {
+	return lo.Must(codec.AccountID.Decode(s.state.Get(varStateControllerBlockIssuer), iotago.EmptyAccountID))
 }
 
 // GetChainInfo returns global variables of the chain
